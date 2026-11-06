@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Readex+Pro:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --brand: #0e8a6a;
+  --brand-2: #e3a324;
+  --bg: #f4f2ee;
+  --surface: #ffffff;
+  --surface-2: #faf8f5;
+  --sunken: #ece9e3;
+  --ink: #1d2127;
+  --muted: #687079;
+  --line: #e6e2da;
+  --c-coral: #ec5f4f;
+  --c-sky: #2f7fe6;
+  --c-violet: #7c5bd6;
+  --c-mint: #0fa89a;
+  --c-amber: #c97f06;
+  --c-rose: #d9467b;
+  --c-indigo: #4a58d0;
+  --fs: 1;
+  color-scheme: light;
+}
+.dark {
+  --bg: #16171a;
+  --surface: #1f2124;
+  --surface-2: #1a1b1e;
+  --sunken: #292b30;
+  --ink: #e6e4df;
+  --muted: #9a9ea6;
+  --line: #2e3036;
+  --c-coral: #ff8070;
+  --c-sky: #62a2f5;
+  --c-violet: #a58bf5;
+  --c-mint: #3fd0bf;
+  --c-amber: #f0b445;
+  --c-rose: #f075a5;
+  --c-indigo: #8d97f2;
+  color-scheme: dark;
+}
+.hc {
+  --ink: #000000;
+  --muted: #1f1f1f;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f4f4f4;
+  --sunken: #e2e2e2;
+  --line: #000000;
+}
+.dark.hc {
+  --ink: #ffffff;
+  --muted: #e8e8e8;
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface-2: #000000;
+  --sunken: #1c1c1c;
+  --line: #ffffff;
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand2: var(--brand-2);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-coral: var(--c-coral);
+  --color-sky: var(--c-sky);
+  --color-violet: var(--c-violet);
+  --color-mint: var(--c-mint);
+  --color-amber: var(--c-amber);
+  --color-rose: var(--c-rose);
+  --color-indigo: var(--c-indigo);
+  --font-sans: "IBM Plex Sans Arabic", "Readex Pro", system-ui, sans-serif;
+  --font-display: "Readex Pro", "IBM Plex Sans Arabic", system-ui, sans-serif;
+}
+
+html { font-size: calc(15px * var(--fs)); }
+.comfy { font-size: calc(16px * var(--fs)); }
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'%3E%3Cg fill='none' stroke='%23888' stroke-opacity='0.07' stroke-width='1'%3E%3Cpath d='M36 6l9 21 21 9-21 9-9 21-9-21-21-9 21-9z'/%3E%3Crect x='24' y='24' width='24' height='24' transform='rotate(45 36 36)'/%3E%3C/g%3E%3C/svg%3E");
+}
+.hc body, .hc { background-image: none; }
+.num { font-variant-numeric: tabular-nums; }
+.font-display { font-family: var(--font-display); }
+
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.hc :focus-visible { outline: 3px solid #ffbf00; outline-offset: 2px; }
+.hc .card { box-shadow: inset 0 0 0 1px var(--line); }
+
+.rm *, .rm *::before, .rm *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+
+.lt button, .lt [role="button"], .lt select, .lt input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), .lt a.tap { min-height: 44px; }
+.lt button.icon-btn { min-width: 44px; }
+
+.skip-link { position: absolute; inset-inline-start: 8px; top: -60px; z-index: 100; background: var(--brand); color: #fff; padding: 8px 14px; transition: top .15s; }
+.skip-link:focus { top: 8px; }
+
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--muted) 35%, transparent); }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes radar { 0% { transform: scale(.6); opacity: .7 } 100% { transform: scale(2.4); opacity: 0 } }
+.radar-ring { animation: radar 1.6s ease-out infinite; }
+@keyframes shake { 0%,100% { transform: translateX(0) } 20%,60% { transform: translateX(-8px) } 40%,80% { transform: translateX(8px) } }
+.shake { animation: shake .45s ease-in-out 2; }
+@keyframes ticker { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: none } }
+.ticker { animation: ticker .35s ease-out; }
+
+input[type="range"] { accent-color: var(--brand); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--brand); }
+
+@media print {
+  body { background: #fff !important; }
+}
