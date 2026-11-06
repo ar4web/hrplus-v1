@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LifeBuoy, Search, HelpCircle, ChevronDown, Plus, Send, Phone, Mail, Globe, Clock, MessageSquare, Trash2, Building2 } from 'lucide-react';
 import { act, createRes, deleteRes } from '../lib/api';
@@ -45,7 +45,7 @@ function HelpCenter({ admin }: any) {
 }
 
 function Tickets({ admin, context }: any) {
-  const { L, lang } = usePrefs(); const { me } = useAuth(); const toast = useToast();
+  const { L, lang } = usePrefs();  const toast = useToast();
   const tickets = useData('tickets');
   const [nw, setNw] = useState<any>(context ? { subject: '', category: 'General', priority: 'normal', message: '', context } : null);
   const [openId, setOpenId] = useState<any>(null); const [reply, setReply] = useState(''); const [busy, setBusy] = useState(''); const [err, setErr] = useState('');
@@ -93,7 +93,7 @@ function Tickets({ admin, context }: any) {
 }
 
 function Contact() {
-  const { L, lang } = usePrefs(); const { me } = useAuth();
+  const { L } = usePrefs(); const { me } = useAuth();
   const c = me?.company || {};
   const items = [
     [Building2, L('HR helpdesk', 'مكتب الموارد البشرية'), L(c.legal_name_en, c.legal_name_ar), 'brand', null],

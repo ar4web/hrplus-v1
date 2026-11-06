@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ShieldCheck, CalendarDays, CreditCard, ScrollText, Plus, Save, CheckCircle2, Pencil, Users, AlertTriangle, BadgeCheck, Trash2 } from 'lucide-react';
+import { ShieldCheck, CalendarDays, CreditCard, ScrollText, Plus, Save, CheckCircle2, Pencil, Users, AlertTriangle, BadgeCheck } from 'lucide-react';
 import { act, createRes, updateRes } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { usePrefs } from '../lib/prefs';
@@ -9,7 +9,7 @@ import { fmtDate, money, riyadhToday, num } from '../lib/format';
 import { iqamaStatus } from '../lib/saudi';
 
 function Compliance() {
-  const { L, lang } = usePrefs(); const { me } = useAuth();
+  const { L } = usePrefs(); const { me } = useAuth();
   const emps = useData('employees'); const runs = useData('payroll_runs', { limit: 3 }); const rules = useData('rules'); const acks = useData('rule_acks'); const invs = useData('invoices', { limit: 5, order: 'icv', asc: 'false' });
   if (emps.loading) return <Spinner />;
   const c = me?.company || {}; const today = riyadhToday();

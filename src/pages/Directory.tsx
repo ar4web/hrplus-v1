@@ -204,7 +204,7 @@ function IqamaTracker({ emps, onOpen }: any) {
 }
 
 export default function Directory() {
-  const { me, role } = useAuth();
+  const { role } = useAuth();
   const { L, lang } = usePrefs();
   const toast = useToast();
   const [sp, setSp] = useSearchParams();

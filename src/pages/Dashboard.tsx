@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { GripVertical, Maximize2, Minimize2, EyeOff, Eye, ArrowUp, ArrowDown, TrendingUp, TrendingDown, RotateCcw, RefreshCw, MapPin, CalendarDays, FileText, Receipt, Wallet, Users, Clock, MessageSquare, Activity, ChevronRight } from 'lucide-react';
@@ -100,7 +100,7 @@ export default function Dashboard() {
   const charts = data?.charts || [];
   const keys = charts.map((c: any) => c.key);
   const saved = prefs.dashboard?.order || [];
-  const order = useMemo(() => [...saved.filter((k) => keys.includes(k)), ...keys.filter((k: string) => !saved.includes(k))], [saved.join(), keys.join()]);
+  const order = [...saved.filter((k) => keys.includes(k)), ...keys.filter((k: string) => !saved.includes(k))];
   const wide = prefs.dashboard?.wide ?? DEFAULT_WIDE;
   const hidden = prefs.dashboard?.hidden || [];
   const save = (patch: any) => setPrefs({ dashboard: { order, wide, hidden, ...patch } });

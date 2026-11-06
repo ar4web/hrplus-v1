@@ -44,8 +44,11 @@ export function PrefsProvider({ children }: { children: any }) {
     const p = pending.current; pending.current = {};
     if (!Object.keys(p).length) return;
     const { data } = await supabase.auth.getSession();
-    if (!data.session) return;
-    await act('prefs.save', { prefs: p });
+    // Keep the patch queued if we cannot persist it, otherwise the user's
+    // preference silently reverts on the next page load.
+    if (!data.session) { pending.current = { ...p, ...pending.current }; return; }
+    try { await act('prefs.save', { prefs: p }); }
+    catch (e) { pending.current = { ...p, ...pending.current }; throw e; }
   }, []);
   const setPrefs = useCallback((patch: Partial<Prefs>) => {
     setState((s) => ({ ...s, ...patch }));

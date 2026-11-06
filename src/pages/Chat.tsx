@@ -23,7 +23,7 @@ export default function Chat() {
   const activeRef = useRef<number | null>(null);
   const chanRef = useRef<any>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  activeRef.current = active;
+  useEffect(() => { activeRef.current = active; }, [active]);
 
   const loadList = useCallback(async () => { try { const r = await act('chat.list'); setConvs(r.conversations); setErr(''); } catch (e: any) { setErr(e.message); } finally { setLoading(false); } }, []);
   const loadMsgs = useCallback(async (id: number, silent = false) => { if (!silent) setMLoading(true); try { const r = await act('chat.messages', { conversation_id: id }); if (activeRef.current === id) setMsgs(r.messages); } catch (e: any) { toast(e.message, 'error'); } finally { setMLoading(false); } }, [toast]);

@@ -5,6 +5,7 @@ import { PrefsProvider, usePrefs } from './lib/prefs';
 import { AuthProvider, useAuth } from './lib/auth';
 import { ToastProvider, Spinner, ErrorBox, Btn } from './components/ui';
 import Shell from './components/Shell';
+import ErrorBoundary from './components/ErrorBoundary';
 import Login, { Splash } from './pages/Login';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -32,6 +33,11 @@ function RoleGate({ roles, children }: any) {
 
 function Gate() {
   const { session, me, loading, mfaNeeded, error, reloadMe, signOut } = useAuth();
+  // Dev-only: /?crash=1 throws on purpose so the error boundary is exercised by
+  // the browser test suite. Stripped from production builds by the DEV check.
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('crash')) {
+    throw new Error('Dev crash switch (/?crash=1)');
+  }
   const { L, prefs } = usePrefs();
   if (loading) return <Splash />;
   if (!session || mfaNeeded) return <Login />;
@@ -45,6 +51,7 @@ function Gate() {
   return (
     <MotionConfig reducedMotion={prefs.reduceMotion ? 'always' : 'user'}>
       <Shell>
+        <ErrorBoundary compact resetKey={window.location.pathname}>
         <Suspense fallback={<Spinner />}>
           <Routes>
             <Route path="/" element={me.profile.status === 'pending' ? <Navigate to="/settings" replace /> : <Dashboard />} />
@@ -65,6 +72,7 @@ function Gate() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        </ErrorBoundary>
       </Shell>
     </MotionConfig>
   );
@@ -76,7 +84,9 @@ export default function App() {
       <ToastProvider>
         <AuthProvider>
           <BrowserRouter>
-            <Gate />
+            <ErrorBoundary>
+              <Gate />
+            </ErrorBoundary>
           </BrowserRouter>
         </AuthProvider>
       </ToastProvider>

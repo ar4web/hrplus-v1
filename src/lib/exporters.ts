@@ -1,3 +1,4 @@
+import { buildDocxBytes, domToBlocks, DOCX_MIME } from './docx';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 
@@ -32,9 +33,11 @@ export async function exportPdf(el: HTMLElement, name: string) {
 }
 
 export function exportWord(el: HTMLElement, name: string) {
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${name}</title><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]--><style>@page{size:A4;margin:1.5cm}body{font-family:'Arial',sans-serif}table{border-collapse:collapse}</style></head><body>${el.outerHTML}</body></html>`;
-  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-  const url = URL.createObjectURL(blob); trigger(url, `${name}.doc`); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  // Emit a genuine .docx package. The old version produced HTML named `.doc`,
+  // which made Word show a "file format and extension don't match" warning.
+  const bytes = buildDocxBytes(domToBlocks(el));
+  const blob = new Blob([bytes as unknown as BlobPart], { type: DOCX_MIME });
+  const url = URL.createObjectURL(blob); trigger(url, `${name}.docx`); setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 export function printEl(el: HTMLElement, title = 'HRplus') {

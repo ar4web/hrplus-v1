@@ -118,7 +118,7 @@ export function Donut({ labels = [], values = [], fmt = 'num', size = 150, cente
   const total = values.reduce((s: number, v: any) => s + (Number(v) || 0), 0);
   const [hover, setHover] = useState<number | null>(null);
   const R = 52, C = 2 * Math.PI * R;
-  const segs = useMemo(() => { let off = 0; return values.map((v: any, i: number) => { const len = total ? ((Number(v) || 0) / total) * C : 0; const s = { len, off, color: PALETTE[i % PALETTE.length] }; off += len; return s; }); }, [values, total, C]);
+  const segs = useMemo(() => { const lens = values.map((v: any) => (total ? ((Number(v) || 0) / total) * C : 0)); return lens.map((len: number, i: number) => ({ len, off: lens.slice(0, i).reduce((a: number, b: number) => a + b, 0), color: PALETTE[i % PALETTE.length] })); }, [values, total, C]);
   if (!total) return <div className="h-32 grid place-items-center text-sm text-muted">{lang === 'ar' ? 'لا توجد بيانات' : 'No data for this period'}</div>;
   return (
     <div className="flex flex-wrap items-center gap-4">
