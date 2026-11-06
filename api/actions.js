@@ -16,13 +16,19 @@ export default async function handler(req, res) {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
-    const ctx = await authenticate(req);
     const b = req.body || {};
     const fn = H[b.action];
     if (!fn) throw new HttpError(400, 'Unknown action');
-    if (ctx.profile.status === 'pending' && !PENDING_OK.includes(b.action)) throw new HttpError(403, 'Your account is awaiting approval by an administrator');
-    const out = await fn(ctx, b);
-    res.status(200).json(out ?? { ok: true });
+    // demo.access lets an unauthenticated user enter demo mode via a one-time token.
+    if (b.action !== 'demo.access') {
+      const ctx = await authenticate(req);
+      if (ctx.profile.status === 'pending' && !PENDING_OK.includes(b.action)) throw new HttpError(403, 'Your account is awaiting approval by an administrator');
+      const out = await fn(ctx, b);
+      res.status(200).json(out ?? { ok: true });
+    } else {
+      const out = await fn(null, b);
+      res.status(200).json(out ?? { ok: true });
+    }
   } catch (e) { sendError(res, e); }
 }
 
@@ -1004,14 +1010,12 @@ H['demo.access'] = async (ctx, b) => {
   if (!rec) throw new HttpError(404, 'Invalid or expired demo token');
   if (Date.now() > rec.expiresAt) { demoTokens.delete(token); throw new HttpError(403, 'Demo token has expired'); }
   if (rec.uses >= (rec.maxUses || 1)) { demoTokens.delete(token); throw new HttpError(403, 'Demo token has already been used'); }
-  if (!ctx.profile || ctx.profile.role !== 'admin') throw new HttpError(403, 'Demo access requires an administrator account');
   rec.uses += 1;
   if (rec.uses >= (rec.maxUses || 1)) demoTokens.delete(token);
-  await audit(ctx, 'demo.access.use', 'demo_tokens', token, { usedBy: ctx.profile.id });
-  return { ok: true, demo: true, role: ctx.profile.role };
+  await audit(ctx || { profile: { id: null, email: 'demo', role: 'demo' }, ip: 'demo' }, 'demo.access.use', 'demo_tokens', token, { usedBy: ctx?.profile?.id ?? null });
+  return { ok: true, demo: true, role: 'demo' };
 };
 
-function windowOrigin(ctx: any) {
-  const origin = ctx?.req?.headers?.origin || ctx?.headers?.origin;
-  return origin || 'https://hrplus-v1.vercel.app';
+function windowOrigin() {
+  return 'https://hrplus-v1.vercel.app';
 }
