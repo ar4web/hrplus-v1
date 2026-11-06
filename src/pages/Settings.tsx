@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Settings as Cog, Save, Lock, Database, Download } from 'lucide-react';
+import { Settings as Cog, Save, Lock, Database, Download, RotateCcw } from 'lucide-react';
 import supabase from '../lib/supabase';
 import { act, updateRes } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -23,9 +23,10 @@ export default function Settings() {
   const [err, setErr] = useState('');
   const [timeout, setTo] = useState(me?.company?.settings?.security?.session_timeout_minutes || 30);
   const [backups, setBackups] = useState<any[]>([]);
+  const [restore, setRestore] = useState<any>(null);
   const users = useData(admin && tab === 'users' ? 'profiles' : null);
   const logs = useData(admin && tab === 'audit' ? 'audit_logs' : null, { limit: 200 });
-  useEffect(() => { if (admin && tab === 'backup') act('backup.list').then((r) => setBackups(r.files)).catch(() => {}); }, [tab]);
+  useEffect(() => { if (admin && tab === 'backup') act('backup.list').then((r) => setBackups(r.files)).catch(() => {}); }, [tab, admin]);
   const p = async (patch: any) => { await savePrefs(patch); toast(L('Saved', 'تم الحفظ')); };
   return (
     <div>
@@ -45,7 +46,18 @@ export default function Settings() {
         {admin && <Card title={L('Company security policy', 'سياسة الأمان')}><div className="grid gap-2"><Field label={L('Session idle timeout (minutes)', 'مهلة الجلسة (دقائق)')}><Input type="number" min="5" max="480" value={timeout} onChange={(e: any) => setTo(e.target.value)} /></Field><Toggle label={L('Require MFA for admins', 'إلزام المسؤولين بالتحقق الثنائي')} checked={!!me?.company?.settings?.security?.require_mfa_admin} onChange={async (v: boolean) => { const r = await updateRes('company', 1, { settings: { security: { ...(me?.company?.settings?.security || {}), require_mfa_admin: v } } }); setCompany(r); toast('Saved'); }} /><Btn icon={Save} onClick={async () => { const r = await updateRes('company', 1, { settings: { security: { ...(me?.company?.settings?.security || {}), session_timeout_minutes: Number(timeout) } } }); setCompany(r); toast('Saved'); }}>{L('Save', 'حفظ')}</Btn></div></Card>}
       </div>}
       {tab === 'users' && admin && <Card pad={false} title={L('Users & roles', 'المستخدمون والأدوار')}><Table rows={users.data} columns={[{ key: 'display_name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'role', label: 'Role', render: (u: any) => <Select className="!h-8 !w-auto text-xs" value={u.role} disabled={u.id === me?.profile?.id} onChange={async (e: any) => { try { await updateRes('profiles', u.id, { role: e.target.value }); users.reload(true); toast('Saved'); } catch (er: any) { toast(er.message, 'error'); } }}><option>admin</option><option>employee</option><option>vendor</option></Select> }, { key: 'status', label: 'Status', render: (u: any) => <Select className="!h-8 !w-auto text-xs" value={u.status} disabled={u.id === me?.profile?.id} onChange={async (e: any) => { try { await updateRes('profiles', u.id, { status: e.target.value }); users.reload(true); toast('Saved'); } catch (er: any) { toast(er.message, 'error'); } }}><option>active</option><option>pending</option><option>disabled</option></Select> }, { key: 'mfa', label: 'MFA', render: (u: any) => u.mfa_enabled ? <Badge tone="mint">on</Badge> : <Badge>off</Badge> }, { key: 'claimed', label: 'Signed up', render: (u: any) => u.user_id ? '✓' : '—' }]} /></Card>}
-      {tab === 'backup' && admin && <Card title={L('Backups', 'النسخ الاحتياطي')} icon={Database}><Btn onClick={async () => { try { const r = await act('backup.create'); toast(`Backup ${r.name} created`); const l = await act('backup.list'); setBackups(l.files); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Create backup now', 'إنشاء نسخة الآن')}</Btn><ul className="mt-3 text-sm">{backups.map((b) => <li key={b.name} className="flex justify-between py-1"><span>{b.name}</span><Btn size="xs" variant="soft" icon={Download} onClick={async () => { const r = await act('backup.download', { name: b.name }); window.open(r.url, '_blank'); }}>Download</Btn></li>)}</ul></Card>}
+      {tab === 'backup' && admin && <Card title={L('Backups', 'النسخ الاحتياطي')} icon={Database}><Btn onClick={async () => { try { const r = await act('backup.create'); toast(`Backup ${r.name} created`); const l = await act('backup.list'); setBackups(l.files); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Create backup now', 'إنشاء نسخة الآن')}</Btn><ul className="mt-3 text-sm">{backups.map((b) => <li key={b.name} className="flex justify-between py-1"><span>{b.name}</span><div className="flex gap-2"><Btn size="xs" variant="soft" icon={Download} onClick={async () => { const r = await act('backup.download', { name: b.name }); window.open(r.url, '_blank'); }}>Download</Btn><Btn size="xs" variant="ghost" icon={RotateCcw} onClick={async () => { try { const plan = await act('backup.restore', { name: b.name, dry_run: true }); setRestore(plan); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Restore', 'استعادة')}</Btn></div></li>)}</ul>
+        {restore && <div className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50 p-3 text-sm" data-testid="restore-preview">
+          <div className="font-medium">{L('Review before restoring', 'راجع قبل الاستعادة')} — {restore.name}</div>
+          <div className="opacity-80 mt-1">{L('This backup would add', 'ستضيف هذه النسخة')} {Object.values<any>(restore.tables).reduce((n, t) => n + t.new, 0)} {L('rows and update', 'صفًا وتحدّث')} {Object.values<any>(restore.tables).reduce((n, t) => n + t.existing, 0)}.</div>
+          <div className="max-h-40 overflow-auto mt-2 text-xs">
+            <table className="w-full"><thead><tr><th className="text-start">{L('Table', 'الجدول')}</th><th>{L('New', 'جديد')}</th><th>{L('Update', 'تحديث')}</th></tr></thead><tbody>
+              {Object.entries(restore.tables).filter(([, t]: any) => t.in_backup).map(([name, t]: any) => <tr key={name}><td>{name}</td><td className="text-center">{t.new}</td><td className="text-center">{t.existing}</td></tr>)}
+            </tbody></table>
+          </div>
+          <div className="flex gap-2 mt-3"><Btn size="xs" onClick={async () => { try { const r = await act('backup.restore', { name: restore.name, mode: 'merge' }); toast(`${r.rows_written} rows restored`); setRestore(null); const l = await act('backup.list'); setBackups(l.files); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Restore (merge)', 'استعادة (دمج)')}</Btn><Btn size="xs" variant="ghost" onClick={() => setRestore(null)}>{L('Cancel', 'إلغاء')}</Btn></div>
+        </div>}
+      </Card>}
       {tab === 'audit' && admin && <Card pad={false} title={L('Audit log', 'سجل التدقيق')}><Table dense rows={logs.data} columns={[{ key: 'at', label: 'When', render: (l: any) => <span className="text-xs">{fmtDateTime(l.created_at, lang)}</span> }, { key: 'actor_email', label: 'Actor' }, { key: 'action', label: 'Action' }, { key: 'resource', label: 'Resource' }, { key: 'record_id', label: 'Record' }, { key: 'ip', label: 'IP' }]} /></Card>}
     </div>
   );

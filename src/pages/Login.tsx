@@ -51,7 +51,7 @@ function MfaStep() {
 }
 
 export default function Login() {
-  const { L, prefs, setPrefs, isDark, lang } = usePrefs();
+  const { L, setPrefs, isDark, lang } = usePrefs();
   const { mfaNeeded, session, notice, setNotice, error: authError } = useAuth();
   const [role, setRole] = useState<'employee' | 'vendor' | 'admin'>('employee');
   const [method, setMethod] = useState<'email' | 'phone'>('email');

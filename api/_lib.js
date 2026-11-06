@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
-import supabase from './db-client.js';
+import supabase, { SUPABASE_URL, SUPABASE_ANON_KEY } from './db-client.js';
 import { generateKeys } from './_zatca.js';
 
-export { supabase };
+export { supabase, SUPABASE_URL, SUPABASE_ANON_KEY };
 
 export function cors(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -140,6 +140,35 @@ export async function audit(ctx, action, resource, recordId, details) {
       details: details || {}, ip: ctx?.ip || null,
     });
   } catch (e) { console.error('audit failed', e); }
+}
+
+// Records that must survive deletion for compliance and audit reasons. Deleting
+// the parent silently orphans them (and Saudi Labor Law requires payroll records
+// to be kept for 5 years), so writes that would do it are refused instead.
+const RETAINED = {
+  employees: [
+    ['payslips', 'employee_id', 'payroll'],
+    ['attendance', 'employee_id', 'attendance'],
+    ['timesheets', 'employee_id', 'timesheet'],
+    ['documents', 'employee_id', 'document'],
+    ['rule_acks', 'employee_id', 'policy acknowledgement'],
+  ],
+  vendors: [
+    ['invoices', 'vendor_id', 'invoice'],
+    ['timesheets', 'vendor_id', 'timesheet'],
+  ],
+};
+
+export async function assertRetainable(table, id) {
+  const deps = RETAINED[table];
+  if (!deps) return;
+  const counts = await Promise.all(deps.map(([t, col]) => supabase.from(t).select('id', { count: 'exact', head: true }).eq(col, id)));
+  const parts = [];
+  counts.forEach((r, i) => { const n = r?.count || 0; if (n) parts.push(`${n} ${deps[i][2]} record(s)`); });
+  if (!parts.length) return;
+  const entity = table === 'employees' ? 'employee' : 'vendor';
+  const hint = table === 'employees' ? ' Set the status to "Terminated" instead.' : ' Revoke the vendor instead.';
+  throw new HttpError(409, `Cannot delete this ${entity}: ${parts.join(', ')} still reference it and must be retained.${hint}`);
 }
 
 export async function notify(profileIds, n) {

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { MapPin, LogIn, LogOut, CloudOff, RefreshCw, ChevronLeft, ChevronRight, Satellite, Building2, Users, CheckCircle2, XCircle, Clock, Home } from 'lucide-react';
-import { act, getRes } from '../lib/api';
+import { MapPin, LogIn, LogOut, CloudOff, RefreshCw, ChevronLeft, ChevronRight, Satellite, Building2, Users, CheckCircle2, Clock, Home } from 'lucide-react';
+import { act } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { usePrefs } from '../lib/prefs';
 import { Card, Btn, Badge, useData, useToast, Input, Select, Table, Spinner, ErrorBox, Empty, Stat, TONE } from '../components/ui';
-import { riyadhToday, addDays, dow, fmtTime, fmtDate, num, monthName } from '../lib/format';
+import { riyadhToday, addDays, dow, fmtTime, fmtDate, num } from '../lib/format';
 import { deptAr } from '../lib/saudi';
 
 const QKEY = 'hrplus.punchQueue';
@@ -45,7 +45,7 @@ function Result({ phase, result, onClose }: any) {
 }
 
 function TeamToday() {
-  const { L, lang } = usePrefs();
+  const { L } = usePrefs();
   const [date, setDate] = useState(riyadhToday());
   const [dept, setDept] = useState('all');
   const emps = useData('employees');

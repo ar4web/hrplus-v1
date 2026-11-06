@@ -17,7 +17,13 @@ const m2 = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
 
 function tlv(tag, value) {
   const v = Buffer.isBuffer(value) ? value : Buffer.from(String(value), 'utf8');
-  return Buffer.concat([Buffer.from([tag, Math.min(v.length, 255)]), v.subarray(0, 255)]);
+  // ZATCA's TLV encodes the length in a single byte, so a value longer than 255
+  // bytes cannot be represented. Truncating it silently would ship a QR that
+  // fails ZATCA validation months later, at audit time — refuse instead.
+  if (v.length > 255) {
+    throw new Error(`ZATCA QR tag ${tag} is ${v.length} bytes; the TLV format allows at most 255. Shorten the field (tag 1 = seller name, tag 8 = public key).`);
+  }
+  return Buffer.concat([Buffer.from([tag, v.length]), v]);
 }
 
 function party(p) {

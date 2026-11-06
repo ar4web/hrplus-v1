@@ -41,9 +41,13 @@ export function fmtDate(iso: any, lang = 'en', opts: Intl.DateTimeFormatOptions 
 export const fmtTime = (iso: any) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Riyadh' }) : '—');
 export const fmtDateTime = (iso: any, lang = 'en') => (iso ? `${fmtDate(iso, lang)} · ${fmtTime(iso)}` : '—');
 export const riyadhToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Riyadh' }).format(new Date());
-export const addDays = (iso: string, n: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-export const dow = (iso: string) => new Date(iso + 'T00:00:00Z').getUTCDay();
-export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+// Calendar helpers deliberately work in UTC on the bare YYYY-MM-DD part: mixing
+// local-midnight parsing with UTC arithmetic is what produces off-by-one days in
+// Riyadh (UTC+3) and across DST switches elsewhere.
+const dateOnly = (iso: string) => String(iso || '').slice(0, 10);
+export const addDays = (iso: string, n: number) => { const d = new Date(`${dateOnly(iso)}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+export const dow = (iso: string) => new Date(`${dateOnly(iso)}T00:00:00Z`).getUTCDay();
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${dateOnly(b)}T00:00:00Z`) - Date.parse(`${dateOnly(a)}T00:00:00Z`)) / 864e5);
 export function timeAgo(iso: string, lang = 'en') {
   const s = Math.max(1, Math.round((Date.now() - Date.parse(iso)) / 1000));
   const u: [number, string, string][] = [[86400 * 30, 'mo', 'شهر'], [86400, 'd', 'يوم'], [3600, 'h', 'ساعة'], [60, 'm', 'دقيقة'], [1, 's', 'ثانية']];

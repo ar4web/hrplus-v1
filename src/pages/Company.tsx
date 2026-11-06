@@ -10,7 +10,7 @@ const DAYS = [['Sun', 'الأحد'], ['Mon', 'الاثنين'], ['Tue', 'الث�
 const INDUSTRIES = ['Information Technology & Consulting', 'Construction & Contracting', 'Retail & Wholesale', 'Manufacturing', 'Healthcare', 'Education', 'Hospitality & Tourism', 'Logistics & Transport', 'Financial Services', 'Oil, Gas & Energy', 'Real Estate', 'Government Services', 'Other'];
 
 export default function Company() {
-  const { L, lang } = usePrefs(); const { setCompany } = useAuth(); const toast = useToast();
+  const { L } = usePrefs(); const { setCompany } = useAuth(); const toast = useToast();
   const [c, setC] = useState<any>(null);
   const [loading, setLoading] = useState(true); const [err, setErr] = useState(''); const [errs, setErrs] = useState<any>({});
   const [busy, setBusy] = useState(false); const [up, setUp] = useState(false); const [saved, setSaved] = useState(false);

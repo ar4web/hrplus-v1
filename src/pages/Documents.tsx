@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileText, Printer, FileDown, FileType2, Image, Search, History, Lock } from 'lucide-react';
 import { act } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -28,7 +28,8 @@ export default function Documents() {
   useEffect(() => { const f: any = {}; tpl.fields.forEach((x) => { f[x.key] = x.def ? x.def(emp) : ''; }); setFields(f); }, [key, empId, emp?.id]);
   const available = TEMPLATES.filter((t) => (admin || t.self) && (cat === 'all' || t.cat === cat) && (!q || `${t.en} ${t.ar}`.toLowerCase().includes(q.toLowerCase())));
   const cats = [...new Set(TEMPLATES.map((t) => t.cat))];
-  const doc = useMemo(() => { try { return emp ? tpl.render({ c: me?.company || {}, e: emp, f: fields }) : null; } catch { return null; } }, [tpl, emp, fields, me?.company]);
+  // Cheap derived value (a plain object); computing it inline keeps the template picker snappy and avoids a stale memo
+  const doc = (() => { try { return emp ? tpl.render({ c: me?.company || {}, e: emp, f: fields }) : null; } catch { return null; } })();
   const refNo = `HR/${riyadhToday().slice(0, 4)}/${(emp?.id || '').replace('EMP', '')}-${String(TEMPLATES.indexOf(tpl) + 1).padStart(2, '0')}`;
   const name = `${tpl.key}_${emp?.id || ''}_${docLang}`;
   const exp = async (format: string) => {

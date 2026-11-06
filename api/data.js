@@ -1,7 +1,7 @@
 // Generic, role-scoped resource router. Every read is filtered server-side by role:
 //   admin → everything; employee → own employee_id; vendor → own vendor_id.
 // Writes through this router are admin-only; self-service writes go through /api/actions.
-import { supabase, cors, authenticate, HttpError, sendError, audit, invalidateCompany, fireWebhooks, publicCompany, getCompany } from './_lib.js';
+import { supabase, cors, authenticate, HttpError, sendError, audit, invalidateCompany, fireWebhooks, publicCompany, getCompany, assertRetainable } from './_lib.js';
 
 const ALL = () => [];
 const own = (col, key, extra = []) => (p) => (p[key] == null || p[key] === '' ? null : [[col, p[key]], ...extra]);
@@ -149,6 +149,14 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       if (q.id == null) throw new HttpError(400, 'id required');
       if (name === 'profiles' && String(q.id) === String(ctx.profile.id)) throw new HttpError(400, 'You cannot delete your own account');
+      await assertRetainable(name, q.id);
+      // payslips.run_id is ON DELETE CASCADE, so deleting a run would take every
+      // payslip with it — payroll history disappears without a trace. A run that
+      // has been finalised is a financial record: keep it.
+      if (name === 'payroll_runs') {
+        const { count } = await supabase.from('payslips').select('id', { count: 'exact', head: true }).eq('run_id', q.id);
+        if (count) throw new HttpError(409, `This run has ${count} payslip(s). Payroll history cannot be deleted — set the run back to draft instead.`);
+      }
       const { error } = await supabase.from(name).delete().eq('id', q.id);
       if (error) throw error;
       await audit(ctx, `${name}.delete`, name, q.id);

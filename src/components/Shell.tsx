@@ -229,8 +229,9 @@ function useIdleLogout() {
   const { me, signOut } = useAuth();
   const [warn, setWarn] = useState(false);
   const minutes = Number(me?.company?.settings?.security?.session_timeout_minutes) || 30;
-  const last = useRef(Date.now());
+  const last = useRef(0);
   useEffect(() => {
+    last.current = Date.now();
     const bump = () => { last.current = Date.now(); if (warn) setWarn(false); };
     const evs = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
     evs.forEach((e) => window.addEventListener(e, bump, { passive: true }));

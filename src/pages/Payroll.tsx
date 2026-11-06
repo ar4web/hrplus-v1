@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Wallet, Play, Download, FileSpreadsheet, CheckCircle2, Printer, FileDown, Image, ShieldCheck, Lock, Search } from 'lucide-react';
 import { act } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -6,7 +6,7 @@ import { usePrefs } from '../lib/prefs';
 import { Card, Btn, Badge, Field, Input, Modal, Table, useData, useToast, Spinner, ErrorBox, Empty, PageHeader, Stat, Select, Confirm, ScaleToFit } from '../components/ui';
 import { PayslipDoc } from '../components/print';
 import { exportPdf, exportPng, printEl } from '../lib/exporters';
-import { sar, money, periodLabel, riyadhToday, download, num } from '../lib/format';
+import { sar, money, periodLabel, riyadhToday, download } from '../lib/format';
 import { deptAr } from '../lib/saudi';
 
 const RS: any = { draft: 'amber', approved: 'sky', paid: 'mint' };

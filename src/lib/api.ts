@@ -4,9 +4,19 @@ export async function api(path: string, opts: RequestInit = {}) {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (session) headers.Authorization = `Bearer ${session.access_token}`;
+  const TIMEOUT_MS = 30000;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   let res: Response;
-  try { res = await fetch(path, { ...opts, headers: { ...headers, ...(opts.headers as any || {}) } }); }
-  catch { const e: any = new Error('Network error — you appear to be offline'); e.network = true; throw e; }
+  try {
+    res = await fetch(path, { ...opts, headers: { ...headers, ...(opts.headers as any || {}) }, signal: opts.signal ?? ctrl.signal });
+  } catch (err: any) {
+    const e: any = err?.name === 'AbortError'
+      ? new Error('Request timed out — please check your connection and retry')
+      : new Error('Network error — you appear to be offline');
+    e.network = true;
+    throw e;
+  } finally { clearTimeout(timer); }
   let body: any = null;
   try { body = await res.json(); } catch { body = null; }
   if (!res.ok) {

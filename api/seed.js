@@ -1,4 +1,6 @@
-// One-time, token-guarded bootstrap seeder. Requires secrets.seed_token; the token is deleted on 'finish'.
+// Token-guarded bootstrap seeder. Requires secrets.seed_token; the token is deleted
+// on 'finish'. Each step records completion in secrets as `seed_step_<name>`, so a
+// step that is repeated is a no-op instead of a duplicate set of employees.
 import crypto from 'node:crypto';
 import { supabase, cors, sendError, HttpError, getCompany, getZatcaKeys, fetchAll } from './_lib.js';
 import { EMPLOYEES, TIMESHEETS } from './_seeddata.js';
@@ -51,8 +53,14 @@ async function core() {
   profiles.push({ email: 'vendor@hrplus.sa', role: 'vendor', vendor_id: gulf.id, display_name: 'Gulf Cloud · Accounts', phone: '+966500000005', status: 'active', prefs: {}, mfa_enabled: false });
   for (const v of vendors.filter((x) => x.type === 'client' && x.id !== gulf.id && x.email)) profiles.push({ email: v.email, role: 'vendor', vendor_id: v.id, display_name: `${v.name} · Accounts`, phone: v.phone, status: 'active', prefs: {}, mfa_enabled: false });
   await insertChunks('profiles', profiles);
-  await insertChunks('timesheets', TIMESHEETS.map((t) => ({ id: t.id, date: t.date, employee_id: t.employee_id, vendor_id: vByName.get(t.client)?.id || null, project: t.project, regular_hours: t.regular_hours, overtime_hours: t.overtime_hours, bill_rate: r2(t.rate_usd * 3.75), status: t.status })));
-  return { employees: emps.length, profiles: profiles.length, timesheets: TIMESHEETS.length };
+  // Guard: spreadsheet exports sometimes carry footer rows ("Total / Average")
+  // in the employee column — they must never become timesheet records.
+  const empIds = new Set(emps.map((e) => e.id));
+  const sheets = TIMESHEETS.filter((t) => empIds.has(t.employee_id));
+  const skipped = TIMESHEETS.length - sheets.length;
+  if (skipped) console.warn(`seed: skipped ${skipped} timesheet row(s) with an unknown employee_id`);
+  await insertChunks('timesheets', sheets.map((t) => ({ id: t.id, date: t.date, employee_id: t.employee_id, vendor_id: vByName.get(t.client)?.id || null, project: t.project, regular_hours: t.regular_hours, overtime_hours: t.overtime_hours, bill_rate: r2(t.rate_usd * 3.75), status: t.status })));
+  return { employees: emps.length, profiles: profiles.length, timesheets: sheets.length };
 }
 
 async function history() {
@@ -304,6 +312,18 @@ async function social() {
   return { acks: acks.length, conversations: cs.length, messages: rows.length };
 }
 
+const STEP_ORDER = ['core', 'history', 'finance', 'social', 'finish'];
+
+async function stepDone(name) {
+  const { data } = await supabase.from('secrets').select('value').eq('key', `seed_step_${name}`).maybeSingle();
+  return !!data?.value;
+}
+async function markStep(name) {
+  const key = `seed_step_${name}`;
+  const { error } = await supabase.from('secrets').upsert({ key, value: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) throw new Error(`could not record seed progress for "${name}": ${error.message}`);
+}
+
 export default async function handler(req, res) {
   if (cors(req, res)) return;
   try {
@@ -312,13 +332,25 @@ export default async function handler(req, res) {
     const given = String(req.body?.token || '');
     if (!tok?.value || given.length !== tok.value.length || !crypto.timingSafeEqual(Buffer.from(given), Buffer.from(tok.value))) throw new HttpError(403, 'Forbidden');
     const step = req.body.step;
+    if (!STEP_ORDER.includes(step)) throw new HttpError(400, `Unknown step — expected one of: ${STEP_ORDER.join(', ')}`);
+    const index = STEP_ORDER.indexOf(step);
+    const marker = (name) => `seed_step_${name}`;
+
+    // Steps build on each other: history needs employees, finance needs runs, etc.
+    for (const prev of STEP_ORDER.slice(0, index)) {
+      if (!(await stepDone(prev))) throw new HttpError(409, `Step "${prev}" has not finished yet — run the steps in order`);
+    }
+    // Re-running a completed step must not duplicate anything.
+    if (step !== 'finish' && (await stepDone(step))) return res.status(200).json({ step, skipped: true, already_done: true });
+
     let out;
     if (step === 'core') out = await core();
     else if (step === 'history') out = await history();
     else if (step === 'finance') out = await finance();
     else if (step === 'social') out = await social();
-    else if (step === 'finish') { await supabase.from('secrets').delete().eq('key', 'seed_token'); out = { done: true }; }
-    else throw new HttpError(400, 'Unknown step');
-    res.status(200).json(out);
+    else out = { done: true };
+    if (step !== 'finish') await markStep(step);
+    else await supabase.from('secrets').delete().eq('key', 'seed_token');
+    res.status(200).json({ step, ...out });
   } catch (e) { sendError(res, e); }
 }

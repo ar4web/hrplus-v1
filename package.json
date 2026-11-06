@@ -1,5 +1,5 @@
 {
-  "name": "vite-react-ts-fullstack",
+  "name": "hrplus",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,20 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:api": "node --import ./dev/register.mjs dev/server.mjs",
+    "dev:all": "node dev/run.mjs",
+    "db:reset": "node -e \"require('fs').rmSync('.data',{recursive:true,force:true});console.log('local database cleared')\"",
+    "db:seed": "node --import ./dev/register.mjs -e \"import('./dev/bootstrap.mjs').then(m=>m.ensureSeeded({log:console.log})).then(r=>console.log(r))\"",
+    "test:api": "node dev/api-test.mjs",
+    "test:e2e": "node dev/smoke.mjs",
+    "test": "npm run test:unit && node dev/api-test.mjs",
+    "test:all": "npm run test:api && npm run test:e2e && npm run test:unit && npm run test:seed && npm run test:rls",
+    "test:unit": "node dev/unit/build-fixtures.mjs && node dev/unit/format-test.mjs && node dev/unit/docx-test.mjs && node dev/unit/zatca-test.mjs && node dev/unit/googleauth-test.mjs",
+    "test:schema": "psql \"$DATABASE_URL\" -q -v ON_ERROR_STOP=1 -f supabase/migrations/0001_init.sql && node dev/check-schema.mjs",
+    "db:migrate": "psql \"$DATABASE_URL\" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_init.sql -f supabase/migrations/0002_storage.sql",
+    "test:rls": "node dev/check-rls.mjs",
+    "test:seed": "node dev/run-seed-test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.1",
@@ -33,6 +46,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "playwright": "^1.65.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",
     "vite": "^7.3.1"

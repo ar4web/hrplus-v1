@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { supabase, cors, sendError, HttpError, normPhone, audit, clientIp } from './_lib.js';
+import { supabase, cors, sendError, HttpError, normPhone, audit, clientIp, SUPABASE_URL, SUPABASE_ANON_KEY } from './_lib.js';
 
 const attempts = new Map();
 
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     const { data: prof } = await supabase.from('profiles').select('email,user_id,status').eq('phone', phone).not('user_id', 'is', null).limit(1);
     const fail = async () => { a.push(now); attempts.set(ip, a); await audit({ actor: phone, role: 'anonymous', ip }, 'auth.login_failed', 'phone', null, { method: 'phone' }); throw new HttpError(401, 'Invalid phone number or password'); };
     if (!prof || !prof[0] || prof[0].status === 'disabled') await fail();
-    const anon = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
     const { data, error } = await anon.auth.signInWithPassword({ email: prof[0].email, password });
     if (error || !data.session) await fail();
     res.status(200).json({ access_token: data.session.access_token, refresh_token: data.session.refresh_token });

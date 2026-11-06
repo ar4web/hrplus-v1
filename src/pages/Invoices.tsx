@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Receipt, Plus, Trash2, Printer, FileDown, Image, FileCode2, Mail, MessageCircle, CheckCircle2, Ban, QrCode, Import, ShieldCheck, Send } from 'lucide-react';
+import { Receipt, Plus, Trash2, Printer, FileDown, Image, FileCode2, Mail, MessageCircle, CheckCircle2, Ban, QrCode, Import, ShieldCheck } from 'lucide-react';
 import { act, updateRes } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { usePrefs } from '../lib/prefs';
 import { Card, Btn, Badge, Field, Input, Select, Textarea, Modal, Tabs, Table, useData, useToast, Spinner, ErrorBox, Empty, PageHeader, Stat, Segmented, Toggle, ScaleToFit, Confirm } from '../components/ui';
 import { InvoiceDoc } from '../components/print';
 import { exportPdf, exportPng, printEl } from '../lib/exporters';
-import { sar, money, fmtDate, download, riyadhToday, periodLabel } from '../lib/format';
+import { sar, money, fmtDate, download, riyadhToday } from '../lib/format';
 
 const ST: any = { issued: 'sky', sent: 'violet', paid: 'mint', void: 'slate' };
 const DESIGNS = [{ value: 'classic', en: 'Classic letterhead', ar: 'كلاسيكي' }, { value: 'band', en: 'Modern band', ar: 'حديث' }, { value: 'minimal', en: 'Minimal', ar: 'بسيط' }];
@@ -106,7 +106,7 @@ function InvoiceView({ inv, onClose, onChanged, links }: any) {
   const name = inv.number;
   const send = async (channel: string) => {
     const w = window.open('about:blank', '_blank');
-    try { const r = await act('invoice.send', { id: inv.id, channel }); if (r.link) { if (w) w.location.href = r.link; else window.location.href = r.link; } else { w?.close(); toast(L('Customer has no contact for this channel', 'لا توجد بيانات اتصال'), 'error'); } onChanged(); } catch (e: any) { w?.close(); toast(e.message, 'error'); }
+    try { const r = await act('invoice.send', { id: inv.id, channel }); if (r.link) { if (w) w.location.assign(r.link); else window.location.assign(r.link); } else { w?.close(); toast(L('Customer has no contact for this channel', 'لا توجد بيانات اتصال'), 'error'); } onChanged(); } catch (e: any) { w?.close(); toast(e.message, 'error'); }
   };
   const setStatus = async (status: string) => { try { await act('invoice.status', { id: inv.id, status }); toast(L('Invoice updated', 'تم التحديث')); onChanged(); onClose(); } catch (e: any) { toast(e.message, 'error'); } };
   const saveDesign = async (d: string) => { setDesign(d); if (role === 'admin') { try { await updateRes('invoices', inv.id, { design: d }); onChanged(); } catch { /* ignore */ } } };

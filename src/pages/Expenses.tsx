@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CreditCard, Plus, Upload, Check, X, Paperclip, PiggyBank, AlertTriangle, FileImage } from 'lucide-react';
 import { act, uploadFile } from '../lib/api';
