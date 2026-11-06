@@ -5,12 +5,22 @@ import { r2, r1, riyadhDate, riyadhTime, riyadhMinutes, addDays, workingDays, ca
 import { signInvoice, computeLines, INITIAL_PIH } from './_zatca.js';
 
 const H = {};
-const PENDING_OK = ['prefs.save', 'profile.update', 'mfa.sync', 'notifications.list', 'notifications.read', 'ticket.create', 'ticket.reply', 'audit.event', 'demo.access'];
+const PENDING_OK = ['prefs.save', 'profile.update', 'mfa.sync', 'notifications.list', 'notifications.read', 'ticket.create', 'ticket.reply', 'audit.event', 'demo.access', 'demo.bootstrap'];
 
 // Demo access tokens (admin-only, time-limited). In production these should be
 // persisted in a DB table; for the local emulator they live in memory.
 const demoTokens = new Map(); // token -> { expiresAt, createdBy, maxUses, uses }
 const DEMO_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Bootstrap: create a default demo token if none exists (demo mode only, no auth).
+function ensureDemoToken() {
+  for (const [token, rec] of demoTokens) {
+    if (Date.now() <= rec.expiresAt && rec.uses < (rec.maxUses || 1)) return token;
+  }
+  const token = 'demo-' + crypto.randomBytes(8).toString('hex');
+  demoTokens.set(token, { expiresAt: Date.now() + DEMO_TTL_MS, createdBy: 'bootstrap', maxUses: 100, uses: 0 });
+  return token;
+}
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -19,8 +29,8 @@ export default async function handler(req, res) {
     const b = req.body || {};
     const fn = H[b.action];
     if (!fn) throw new HttpError(400, 'Unknown action');
-    // demo.access lets an unauthenticated user enter demo mode via a one-time token.
-    if (b.action !== 'demo.access') {
+    // demo.access and demo.bootstrap let unauthenticated users enter demo mode.
+    if (b.action !== 'demo.access' && b.action !== 'demo.bootstrap') {
       const ctx = await authenticate(req);
       if (ctx.profile.status === 'pending' && !PENDING_OK.includes(b.action)) throw new HttpError(403, 'Your account is awaiting approval by an administrator');
       const out = await fn(ctx, b);
@@ -1000,7 +1010,7 @@ H['demo.generate'] = async (ctx) => {
     uses: 0,
   });
   await audit(ctx, 'demo.link.create', 'demo_tokens', token, { expiresAt: new Date(Date.now() + DEMO_TTL_MS).toISOString() });
-  return { token, url: `${windowOrigin(ctx)}/login?demo=${token}`, expiresAt: new Date(Date.now() + DEMO_TTL_MS).toISOString() };
+  return { token, url: `${windowOrigin()}/login?demo=${token}`, expiresAt: new Date(Date.now() + DEMO_TTL_MS).toISOString() };
 };
 
 H['demo.access'] = async (ctx, b) => {
@@ -1014,6 +1024,14 @@ H['demo.access'] = async (ctx, b) => {
   if (rec.uses >= (rec.maxUses || 1)) demoTokens.delete(token);
   await audit(ctx || { profile: { id: null, email: 'demo', role: 'demo' }, ip: 'demo' }, 'demo.access.use', 'demo_tokens', token, { usedBy: ctx?.profile?.id ?? null });
   return { ok: true, demo: true, role: 'demo' };
+};
+
+// Bootstrap demo token — no auth required (demo mode / local emulator only).
+H['demo.bootstrap'] = async (_ctx, b) => {
+  const mode = String(b?.mode || '');
+  if (mode !== 'demo') throw new HttpError(400, 'Invalid bootstrap mode');
+  const token = ensureDemoToken();
+  return { token, url: `${windowOrigin()}/login?demo=${token}` };
 };
 
 function windowOrigin() {
