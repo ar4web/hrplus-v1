@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast feedback: types, lint, pure-logic unit tests, and the client↔server contract.
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Type-check + production build
+        run: npm run build
+      - name: Lint (errors fail, warnings reported)
+        run: npx eslint . --max-warnings=1000
+      - name: Unit tests (dates, .docx, ZATCA QR)
+        run: npm run test:unit
+      - name: Seed steps are idempotent and ordered
+        run: npm run test:seed
+      - name: Contract audit (every action/resource the UI calls exists)
+        run: node dev/audit-contract.mjs
+
+  # Drives the real handlers against the local Supabase emulator, with Postgres
+  # standing in for the database so the migrations and RLS policies are exercised.
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Apply migrations to PostgreSQL
+        run: npm run db:migrate
+
+      - name: Seed the demo data (idempotent — safe to re-run)
+        run: npm run db:seed
+
+      - name: Schema matches the code and loads the seed data
+        run: node dev/check-schema.mjs  # `npm run test:schema` also re-applies the migration first
+
+      - name: RLS + storage policies (anon / authenticated / service_role)
+        run: npm run test:rls
+
+      - name: Start the local API
+        run: |
+          node dev/server.mjs > api.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8787/api/health && break
+            sleep 1
+          done
+
+      - name: API behaviour (RBAC, approvals, uploads, integration API, sessions)
+        run: node dev/api-test.mjs
+
+      # The suite writes through the real handlers. Reloading the result into
+      # Postgres afterwards is what catches a handler writing a value the schema
+      # forbids: an enum its CHECK rejects, or an orphaned foreign key.
+      - name: Data written by the suite is still schema-legal
+        run: npm run test:schema
+
+      - name: API log on failure
+        if: failure()
+        run: cat api.log
+
+  # Headless browser pass over every route as all three roles.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Start API + Vite
+        run: |
+          npm run dev:all > dev.log 2>&1 &
+          for i in $(seq 1 90); do
+            curl -sf http://127.0.0.1:5173/ > /dev/null && break
+            sleep 1
+          done
+      - name: Walk every route as admin, employee and vendor
+        run: npm run test:e2e
+      - name: Dev log on failure
+        if: failure()
+        run: cat dev.log
