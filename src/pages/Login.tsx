@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, Phone, ShieldCheck, Eye, EyeOff, Languages, Sun, Moon, KeyRound, Loader2, Check } from 'lucide-react';
+import { Mail, Phone, ShieldCheck, Lock, Eye, EyeOff, Languages, Sun, Moon, KeyRound, Loader2, Check } from 'lucide-react';
 import supabase from '../lib/supabase';
 import { signInWithGoogle } from '../lib/googleAuth';
 import { useAuth } from '../lib/auth';
