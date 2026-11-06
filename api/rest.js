@@ -3,11 +3,15 @@
 // GET  /api/rest?resource=employees      → list (limit, offset, any column=value filter)
 // GET  /api/rest?resource=employees&id=X → single
 // POST/PUT/DELETE (write scope)          → create / update (?id=) / delete (?id=)
-import { supabase, cors, sendError, HttpError, sha256hex, audit, clientIp, fireWebhooks } from './_lib.js';
+import { supabase, cors, sendError, HttpError, sha256hex, audit, clientIp, fireWebhooks, assertRetainable } from './_lib.js';
+import { splitColumns, isColumn, columnsOf } from './_schema.js';
 
 const READ = ['employees', 'attendance', 'leave_requests', 'leave_types', 'holidays', 'payroll_runs', 'payslips', 'invoices', 'expenses', 'expense_categories', 'assets', 'vendors', 'timesheets', 'documents', 'rules'];
 const WRITE = ['employees', 'attendance', 'leave_requests', 'expenses', 'assets', 'vendors', 'timesheets', 'holidays'];
 const RESERVED = ['resource', 'id', 'limit', 'offset', 'order', 'asc'];
+// Master records own financial/compliance history. An integration may create and
+// update them through the app's own rules, but not delete them out from under it.
+const NO_DELETE = ['employees', 'vendors'];
 const COL = /^[a-z_]+$/;
 
 export default async function handler(req, res) {
@@ -26,7 +30,11 @@ export default async function handler(req, res) {
       if (!READ.includes(resource)) throw new HttpError(404, 'Unknown resource');
       let query = supabase.from(resource).select('*', { count: 'exact' });
       if (q.id) query = query.eq('id', q.id);
-      for (const [k, v] of Object.entries(q)) if (!RESERVED.includes(k) && COL.test(k)) query = query.eq(k, v);
+      const filters = Object.entries(q).filter(([k]) => !RESERVED.includes(k));
+      for (const [k, v] of filters) {
+        if (!isColumn(resource, k)) throw new HttpError(400, `Unknown field "${k}" — readable fields: ${columnsOf(resource).join(', ')}`);
+        query = query.eq(k, v);
+      }
       const limit = Math.min(parseInt(q.limit, 10) || 100, 500), offset = Math.max(parseInt(q.offset, 10) || 0, 0);
       const order = q.order && COL.test(q.order) ? q.order : 'id';
       query = query.order(order, { ascending: q.asc !== 'false' }).range(offset, offset + limit - 1);
@@ -39,8 +47,14 @@ export default async function handler(req, res) {
     }
     if (!(key.scopes || []).includes('write')) throw new HttpError(403, 'This API key is read-only');
     if (!WRITE.includes(resource)) throw new HttpError(403, 'Resource is not writable via API');
-    const body = req.body || {};
-    const values = {}; for (const [k, v] of Object.entries(body)) if (COL.test(k) && k !== 'created_at') values[k] = v;
+    const { values: sent, rejected } = splitColumns(resource, req.body || {});
+    if (rejected.length) throw new HttpError(400, `Unknown field(s) for ${resource}: ${rejected.join(', ')} — writable fields: ${columnsOf(resource).filter((c) => c !== 'created_at').join(', ')}`);
+    const values = { ...sent };
+    delete values.created_at;
+    for (const [k, v] of Object.entries(values)) {
+      if (v === undefined) delete values[k];
+      else if (v !== null && typeof v === 'object' && !Array.isArray(v)) throw new HttpError(400, `Field "${k}" must be a value, not an object`);
+    }
     if (req.method === 'POST') {
       const { data, error } = await supabase.from(resource).insert(values).select().single();
       if (error) throw new HttpError(400, error.message);
@@ -57,6 +71,8 @@ export default async function handler(req, res) {
       return res.status(200).json({ data });
     }
     if (req.method === 'DELETE') {
+      if (NO_DELETE.includes(resource)) throw new HttpError(403, `${resource} cannot be deleted through the integration API — use the app so history is preserved`);
+      await assertRetainable(resource, q.id);
       const { error } = await supabase.from(resource).delete().eq('id', q.id);
       if (error) throw new HttpError(400, error.message);
       await audit(ctx, `api.${resource}.delete`, resource, q.id);

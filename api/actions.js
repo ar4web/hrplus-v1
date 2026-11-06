@@ -63,7 +63,7 @@ H['mfa.sync'] = async (ctx) => {
   return { mfa_enabled: enabled };
 };
 H['audit.event'] = async (ctx, b) => {
-  const ok = ['auth.logout', 'auth.idle_timeout', 'document.export', 'payroll.wps_export', 'invoice.download', 'payslip.download', 'settings.export'];
+  const ok = ['auth.logout', 'auth.idle_timeout', 'document.export', 'payroll.wps_export', 'invoice.download', 'payslip.download', 'settings.export', 'ui.error'];
   need(ok.includes(b.event), 'Event not allowed');
   await audit(ctx, b.event, b.resource || null, b.record_id || null, typeof b.details === 'object' ? b.details : {});
   return { ok: true };
@@ -188,9 +188,16 @@ H['leave.decide'] = async (ctx, b) => {
   need(['approved', 'rejected'].includes(b.decision), 'Invalid decision');
   const { data: r } = await supabase.from('leave_requests').select('*, leave_types(name_en,name_ar)').eq('id', b.id).maybeSingle();
   need(r && r.status === 'pending', 'Request is not pending');
+  // An admin is usually also an employee: approving your own leave defeats the control.
+  need(!ctx.profile.employee_id || r.employee_id !== ctx.profile.employee_id, 'You cannot decide on your own request', 403);
   if (b.decision === 'rejected') need(String(b.note || '').trim().length >= 3, 'Please give a reason for rejection');
-  const { data, error } = await supabase.from('leave_requests').update({ status: b.decision, decision_note: String(b.note || '').slice(0, 300), decided_by: ctx.profile.display_name, decided_at: new Date().toISOString() }).eq('id', r.id).select().single();
+  // Guard the write on the status we just read: two admins clicking at the same
+  // time must not both "win" and fire duplicate notifications/webhooks.
+  const { data, error } = await supabase.from('leave_requests')
+    .update({ status: b.decision, decision_note: String(b.note || '').slice(0, 300), decided_by: ctx.profile.display_name, decided_at: new Date().toISOString() })
+    .eq('id', r.id).eq('status', 'pending').select().maybeSingle();
   if (error) throw error;
+  need(data, 'This request was already decided by someone else — refresh to see the current state', 409);
   await audit(ctx, `leave.${b.decision}`, 'leave_requests', r.id, { employee_id: r.employee_id });
   const ok = b.decision === 'approved';
   await notifyEmployee(r.employee_id, { title: [`Leave ${ok ? 'approved' : 'rejected'}`, ok ? 'تمت الموافقة على الإجازة' : 'تم رفض الإجازة'], body: [`${r.leave_types?.name_en} ${r.start_date} → ${r.end_date}${b.note ? ' · ' + b.note : ''}`, `${r.leave_types?.name_ar} ${r.start_date} ← ${r.end_date}`], link: '/leave', level: ok ? 'success' : 'warning' });
@@ -232,6 +239,7 @@ H['expense.decide'] = async (ctx, b) => {
   const { data: x } = await supabase.from('expenses').select('*').eq('id', b.id).maybeSingle();
   need(x && x.status === 'pending', 'Claim is not pending');
   need(['approve', 'reject'].includes(b.decision), 'Invalid decision');
+  need(!ctx.profile.employee_id || x.employee_id !== ctx.profile.employee_id, 'You cannot decide on your own claim', 403);
   if (b.decision === 'reject') need(String(b.note || '').trim().length >= 3, 'Please give a reason');
   const chain = [...(x.approval_chain || [])];
   const i = x.current_step || 0;
@@ -239,8 +247,12 @@ H['expense.decide'] = async (ctx, b) => {
   let status = 'pending', step = i;
   if (b.decision === 'reject') status = 'rejected';
   else if (i + 1 >= chain.length) status = 'approved'; else step = i + 1;
-  const { data, error } = await supabase.from('expenses').update({ approval_chain: chain, current_step: step, status }).eq('id', x.id).select().single();
+  // Optimistic lock: `current_step` must not have moved since we read it.
+  const { data, error } = await supabase.from('expenses')
+    .update({ approval_chain: chain, current_step: step, status })
+    .eq('id', x.id).eq('status', 'pending').eq('current_step', i).select().maybeSingle();
   if (error) throw error;
+  need(data, 'This claim was already actioned by another approver — refresh to continue', 409);
   await audit(ctx, `expense.${b.decision}`, 'expenses', x.id, { step: chain[i].step, status });
   if (status !== 'pending') {
     await notifyEmployee(x.employee_id, { title: [`Expense ${status}`, status === 'approved' ? 'تمت الموافقة على المصروف' : 'تم رفض المصروف'], body: [`SAR ${Number(x.amount).toLocaleString()} · ${x.description}`, `${Number(x.amount).toLocaleString()} ر.س · ${x.description}`], link: '/expenses', level: status === 'approved' ? 'success' : 'warning' });
@@ -350,25 +362,44 @@ H['invoice.create'] = async (ctx, b) => {
   } else {
     buyer = { name: String(b.buyer?.name || 'Cash customer').slice(0, 120), phone: String(b.buyer?.phone || '').slice(0, 20), email: String(b.buyer?.email || '').slice(0, 120) };
   }
-  const { data: last } = await supabase.from('invoices').select('icv,hash').order('icv', { ascending: false }).limit(1);
-  const icv = (last?.[0]?.icv || 0) + 1;
-  const prev_hash = last?.[0]?.hash || INITIAL_PIH;
   const now = new Date();
   const issue_date = riyadhDate(now), issue_time = riyadhTime(now);
   const terms = Number(company.settings?.invoicing?.payment_terms_days) || 30;
   const prefix = company.settings?.invoicing?.prefix || 'INV';
-  const inv = { number: `${prefix}-${issue_date.slice(0, 4)}-${String(icv).padStart(5, '0')}`, uuid: crypto.randomUUID(), icv, prev_hash, issue_date, issue_time, type, buyer, lines, subtotal, vat, total };
-  const signed = signInvoice({ company, inv, keys: await getZatcaKeys() });
   const design = ['classic', 'band', 'minimal'].includes(b.design) ? b.design : (company.settings?.invoicing?.default_design || 'classic');
   const due_date = isoOk(b.due_date) ? b.due_date : addDays(issue_date, terms);
   const channels = [];
   if (b.send?.email && buyer.email) channels.push({ channel: 'email', to: buyer.email, at: now.toISOString(), status: 'prepared' });
   if (b.send?.whatsapp && buyer.phone) channels.push({ channel: 'whatsapp', to: buyer.phone, at: now.toISOString(), status: 'prepared' });
-  const { data, error } = await supabase.from('invoices').insert({ ...inv, vendor_id, due_date, design, status: channels.length ? 'sent' : 'issued', notes: String(b.notes || '').slice(0, 500), sent_via: channels, hash: signed.hash, signature: signed.signature, qr: signed.qr, xml: signed.xml }).select().single();
-  if (error) throw error;
-  await audit(ctx, 'invoice.create', 'invoices', data.id, { number: inv.number, type, total, vendor_id });
-  if (vendor_id) await notifyVendor(vendor_id, { title: [`New tax invoice ${inv.number}`, `فاتورة ضريبية جديدة ${inv.number}`], body: [`SAR ${total.toLocaleString()} due ${due_date}`, `${total.toLocaleString()} ر.س تستحق ${due_date}`], link: '/invoices', level: 'info' });
-  await fireWebhooks('invoice.created', { id: data.id, number: inv.number, type, total, vat, vendor_id, uuid: inv.uuid });
+  const keys = await getZatcaKeys();
+
+  // The ICV (invoice counter value) must increase by exactly one per invoice and
+  // is part of the signed payload, so a collision cannot simply be patched up:
+  // recompute the number, hash chain and signature, then retry. The unique index
+  // on invoices.icv (see supabase/migrations) is the source of truth here.
+  let data = null, error = null;
+  for (let attempt = 0; attempt < 5 && !data; attempt++) {
+    const { data: last } = await supabase.from('invoices').select('icv,hash').order('icv', { ascending: false }).limit(1);
+    const icv = (last?.[0]?.icv || 0) + 1;
+    const prev_hash = last?.[0]?.hash || INITIAL_PIH;
+    const inv = { number: `${prefix}-${issue_date.slice(0, 4)}-${String(icv).padStart(5, '0')}`, uuid: crypto.randomUUID(), icv, prev_hash, issue_date, issue_time, type, buyer, lines, subtotal, vat, total };
+    let signed;
+    try { signed = signInvoice({ company, inv, keys }); }
+    catch (e) {
+      // A field that cannot fit the TLV length byte (e.g. an over-long legal name)
+      // is a data problem, not a server fault — surface it as a 422 the UI can show.
+      throw new HttpError(422, e.message);
+    }
+    const res = await supabase.from('invoices').insert({ ...inv, vendor_id, due_date, design, status: channels.length ? 'sent' : 'issued', notes: String(b.notes || '').slice(0, 500), sent_via: channels, hash: signed.hash, signature: signed.signature, qr: signed.qr, xml: signed.xml }).select().single();
+    if (!res.error) { data = res.data; break; }
+    error = res.error;
+    if (!/duplicate|unique|conflict/i.test(String(res.error.message || ''))) throw res.error;
+  }
+  if (!data) throw error || new HttpError(409, 'Could not allocate the next invoice number — please retry');
+  // `inv` is scoped to the retry loop, so read the persisted row from here on.
+  await audit(ctx, 'invoice.create', 'invoices', data.id, { number: data.number, type, total, vendor_id });
+  if (vendor_id) await notifyVendor(vendor_id, { title: [`New tax invoice ${data.number}`, `فاتورة ضريبية جديدة ${data.number}`], body: [`SAR ${total.toLocaleString()} due ${due_date}`, `${total.toLocaleString()} ر.س تستحق ${due_date}`], link: '/invoices', level: 'info' });
+  await fireWebhooks('invoice.created', { id: data.id, number: data.number, type, total, vat, vendor_id, uuid: data.uuid });
   return { invoice: data, links: sendLinks(data, company, buyer) };
 };
 H['invoice.send'] = async (ctx, b) => {
@@ -383,11 +414,24 @@ H['invoice.send'] = async (ctx, b) => {
   await fireWebhooks('invoice.sent', { id: inv.id, number: inv.number, channel: b.channel });
   return { link: links[b.channel] };
 };
+// ZATCA invoices are reported once issued: a paid invoice may still be voided
+// (credit note), but nothing may leave `void`.
+const INVOICE_TRANSITIONS = {
+  issued: ['sent', 'paid', 'void'],
+  sent: ['paid', 'void'],
+  paid: ['void'],
+  void: [],
+};
 H['invoice.status'] = async (ctx, b) => {
   requireRole(ctx, 'admin');
   need(['paid', 'void', 'sent', 'issued'].includes(b.status), 'Invalid status');
-  const { data, error } = await supabase.from('invoices').update({ status: b.status }).eq('id', b.id).select().single();
+  const { data: cur } = await supabase.from('invoices').select('id,status,number').eq('id', b.id).maybeSingle();
+  need(cur, 'Invoice not found', 404);
+  need(cur.status !== b.status, `Invoice ${cur.number} is already ${b.status}`);
+  need((INVOICE_TRANSITIONS[cur.status] || []).includes(b.status), `Cannot move invoice ${cur.number} from ${cur.status} to ${b.status}`, 409);
+  const { data, error } = await supabase.from('invoices').update({ status: b.status }).eq('id', cur.id).eq('status', cur.status).select().maybeSingle();
   if (error) throw error;
+  need(data, 'This invoice was updated by someone else — refresh to see the current state', 409);
   await audit(ctx, `invoice.${b.status}`, 'invoices', b.id);
   if (b.status === 'paid' && data.vendor_id) await notifyVendor(data.vendor_id, { title: [`Payment received · ${data.number}`, `تم استلام الدفعة · ${data.number}`], body: ['Thank you for your payment.', 'شكراً لسدادكم.'], link: '/invoices', level: 'success' });
   return data;
@@ -395,17 +439,35 @@ H['invoice.status'] = async (ctx, b) => {
 
 /* ---------------- assets ---------------- */
 const ASSET_STATES = ['Procured', 'In Stock', 'Assigned', 'In Repair', 'Retired', 'Disposed'];
+// Straight-line lifecycle: an asset cannot skip from Procured to Retired, and a
+// disposed asset is terminal (it must stay on the books with a disposal record).
+const ASSET_TRANSITIONS = {
+  'Procured': ['In Stock', 'Disposed'],
+  'In Stock': ['Assigned', 'In Repair', 'Retired', 'Disposed'],
+  'Assigned': ['In Stock', 'In Repair', 'Retired', 'Disposed'],
+  'In Repair': ['In Stock', 'Assigned', 'Retired', 'Disposed'],
+  'Retired': ['Disposed'],
+  'Disposed': [],
+};
 H['asset.transition'] = async (ctx, b) => {
   requireRole(ctx, 'admin');
   need(ASSET_STATES.includes(b.status), 'Invalid lifecycle stage');
   const { data: a } = await supabase.from('assets').select('*').eq('id', b.id).maybeSingle();
   need(a, 'Asset not found', 404);
   need(a.status !== 'Disposed', 'Disposed assets cannot change state');
+  need(a.status !== b.status, `Asset ${a.tag} is already ${b.status}`);
+  need((ASSET_TRANSITIONS[a.status] || []).includes(b.status), `Cannot move asset ${a.tag} from ${a.status} to ${b.status}`, 409);
   if (b.status === 'Assigned') need(b.assigned_to, 'Choose an employee to assign to');
   const assigned_to = b.status === 'Assigned' ? b.assigned_to : (b.status === 'In Repair' ? a.assigned_to : null);
   const history = [...(a.history || []), { at: new Date().toISOString(), from: a.status, to: b.status, by: ctx.profile.display_name, note: String(b.note || '').slice(0, 200), assigned_to }];
-  const { data, error } = await supabase.from('assets').update({ status: b.status, assigned_to, history }).eq('id', a.id).select('*, employees(full_name,department)').single();
+  if (b.status === 'Assigned') {
+    const { data: emp } = await supabase.from('employees').select('id,status').eq('id', b.assigned_to).maybeSingle();
+    need(emp, 'That employee does not exist', 400);
+    need(emp.status !== 'Terminated', 'Cannot assign an asset to a terminated employee', 409);
+  }
+  const { data, error } = await supabase.from('assets').update({ status: b.status, assigned_to, history }).eq('id', a.id).eq('status', a.status).select('*, employees(full_name,department)').maybeSingle();
   if (error) throw error;
+  need(data, 'This asset was changed by someone else — refresh and retry', 409);
   await audit(ctx, 'asset.transition', 'assets', a.id, { from: a.status, to: b.status, assigned_to });
   if (b.status === 'Assigned') await notifyEmployee(assigned_to, { title: [`Asset assigned: ${a.name}`, `تم تسليمك أصلاً: ${a.name}`], body: [`Tag ${a.tag}`, `الرمز ${a.tag}`], link: '/assets', level: 'info' });
   return data;
@@ -477,7 +539,8 @@ H['ticket.reply'] = async (ctx, b) => {
   const { data: t } = await supabase.from('tickets').select('*').eq('id', b.id).maybeSingle();
   need(t, 'Ticket not found', 404);
   need(isAdmin(ctx) || t.profile_id === ctx.profile.id, 'Forbidden', 403);
-  const body = String(b.body || '').trim(); need(body.length >= 1, 'Message is empty');
+  // `ticket.create` calls this field `message`; accept both so API clients don't have to guess.
+  const body = String(b.body ?? b.message ?? '').trim(); need(body.length >= 1, 'Message is empty');
   const now = new Date().toISOString();
   const status = isAdmin(ctx) ? (t.status === 'open' ? 'in_progress' : t.status) : (t.status === 'resolved' ? 'open' : t.status);
   const { data, error } = await supabase.from('tickets').update({ messages: [...(t.messages || []), { by: ctx.profile.display_name, role: ctx.profile.role, body: body.slice(0, 4000), at: now }], updated_at: now, status }).eq('id', t.id).select().single();
@@ -589,10 +652,101 @@ H['backup.download'] = async (ctx, b) => {
   await audit(ctx, 'backup.download', 'backups', b.name);
   return { url: data.signedUrl };
 };
+// Restoring is the half of "backup" that matters during an incident. Same file
+// format as backup.create, validated before a single row is written, with a
+// dry run that only reports what would change.
+const BACKUP_NAME_RE = /^hrplus-backup-[\w-]+\.json$/;
+const RESTORE_MAX_BYTES = 25 * 1024 * 1024;
+const RESTORE_CHUNK = 200;
+const isRestorable = (t) => BACKUP_TABLES.includes(t);
+
+async function loadBackup(name) {
+  need(BACKUP_NAME_RE.test(name), 'Invalid backup name');
+  const { data: file, error } = await supabase.storage.from('backups').download(name);
+  if (error || !file) throw new HttpError(404, 'Backup not found');
+  const text = await file.text();
+  need(text.length <= RESTORE_MAX_BYTES, 'Backup file is too large to restore', 413);
+  let dump;
+  try { dump = JSON.parse(text); } catch { throw new HttpError(400, 'Backup file is not valid JSON'); }
+  need(dump && dump.app === 'HRplus', 'Not an HRplus backup file');
+  need(Number(dump.version) === 1, `Unsupported backup version: ${dump.version}`);
+  const tables = dump.tables;
+  need(tables && typeof tables === 'object', 'Backup has no tables');
+  const restorable = Object.keys(tables).filter(isRestorable);
+  need(restorable.length > 0, 'Backup contains no tables this app can restore');
+  for (const t of restorable) {
+    need(Array.isArray(tables[t]), `Table "${t}" in the backup is not a list of rows`);
+    for (const r of tables[t]) need(r && typeof r === 'object' && String(r?.id ?? '').length > 0, `Table "${t}" has a row without an id`);
+  }
+  return { dump, restorable, ignored: Object.keys(tables).filter((t) => !isRestorable(t)) };
+}
+
+H['backup.restore'] = async (ctx, b) => {
+  requireRole(ctx, 'admin');
+  const name = String(b.name || '');
+  const mode = b.mode === 'replace' ? 'replace' : 'merge';
+  const dryRun = b.dry_run === true || b.dry_run === 'true';
+  const { dump, restorable, ignored } = await loadBackup(name);
+  const tables = dump.tables;
+
+  // Replace is destructive: the caller has to echo the file name back.
+  if (!dryRun && mode === 'replace') need(b.confirm === name, 'To replace existing data, confirm by passing the backup file name', 400);
+
+  // Keys are not uniform: employees are EMP1001, invoices INV-2026-0001, and
+  // several tables use serial integers. Compare them as opaque strings.
+  const plan = {};
+  const liveIds = {};
+  for (const t of restorable) {
+    const { data: live, error } = await supabase.from(t).select('id');
+    if (error) throw error;
+    liveIds[t] = (live || []).map((r) => String(r.id));
+    const ids = tables[t].map((r) => String(r.id));
+    const liveSet = new Set(liveIds[t]);
+    const backupSet = new Set(ids);
+    plan[t] = {
+      in_backup: ids.length,
+      new: ids.filter((i) => !liveSet.has(i)).length,
+      existing: ids.filter((i) => liveSet.has(i)).length,
+      removed: mode === 'replace' ? liveIds[t].filter((i) => !backupSet.has(i)).length : 0,
+    };
+  }
+
+  const summary = { name, mode, created_at: dump.created_at, tables: plan, ignored, rows_written: 0 };
+  if (dryRun) return { dry_run: true, ...summary };
+
+  // Parents before children on the way in, children before parents on the way out.
+  const order = [...restorable].sort((a, c) => BACKUP_TABLES.indexOf(a) - BACKUP_TABLES.indexOf(c));
+  let written = 0;
+  if (mode === 'replace') {
+    for (const t of [...order].reverse()) {
+      for (let i = 0; i < liveIds[t].length; i += RESTORE_CHUNK) {
+        const chunk = liveIds[t].slice(i, i + RESTORE_CHUNK);
+        const { error } = await supabase.from(t).delete().in('id', chunk);
+        if (error) throw new HttpError(400, `Could not clear table "${t}": ${error.message}`);
+      }
+    }
+  }
+  for (const t of order) {
+    // Session ids belong to live logins, never to a restored file.
+    const rows = tables[t].map((r) => (t === 'profiles' ? { ...r, session_id: null } : r));
+    for (let i = 0; i < rows.length; i += RESTORE_CHUNK) {
+      const chunk = rows.slice(i, i + RESTORE_CHUNK);
+      const { error } = await supabase.from(t).upsert(chunk, { onConflict: 'id' });
+      if (error) throw new HttpError(400, `Could not restore table "${t}": ${error.message}`);
+      written += chunk.length;
+    }
+  }
+
+  await audit(ctx, 'backup.restore', 'backups', name, { mode, tables: Object.keys(plan).length, rows: written });
+  await notifyAdmins({ title: ['Backup restored', 'تمت استعادة النسخة'], body: [`${name} restored (${mode}, ${written} rows)`, `تمت استعادة ${name} (${mode}، ${written} صفًا)`], link: '/settings' });
+  return { restored: true, ...summary, rows_written: written };
+};
 H['apikey.create'] = async (ctx, b) => {
   requireRole(ctx, 'admin');
   const name = String(b.name || '').trim(); need(name.length >= 2, 'Name is required');
-  const scopes = b.write ? ['read', 'write'] : ['read'];
+  // Accept either the documented `scopes` array or the older `write` flag.
+  const wantsWrite = b.write === true || (Array.isArray(b.scopes) && b.scopes.includes('write'));
+  const scopes = wantsWrite ? ['read', 'write'] : ['read'];
   const raw = 'hrp_' + crypto.randomBytes(24).toString('hex');
   const { data, error } = await supabase.from('api_keys').insert({ name: name.slice(0, 60), prefix: raw.slice(0, 10), key_hash: sha256hex(raw), scopes, revoked: false }).select('id,name,prefix,scopes,created_at').single();
   if (error) throw error;
