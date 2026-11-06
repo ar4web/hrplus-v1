@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Settings as Cog, Save, Lock, Database, Download, RotateCcw } from 'lucide-react';
+import { Settings as Cog, Save, Lock, Database, Download, RotateCcw, Link, Timer } from 'lucide-react';
 import supabase from '../lib/supabase';
 import { act, updateRes } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -14,6 +14,8 @@ export default function Settings() {
   const toast = useToast();
   const [sp, setSp] = useSearchParams();
   const tab = sp.get('tab') || 'profile';
+  const [demoLink, setDemoLink] = useState<string | null>(null);
+  const [demoUrl, setDemoUrl] = useState<string | null>(null);
   const admin = role === 'admin';
   const [name, setName] = useState(me?.profile?.display_name || '');
   const [phone, setPhone] = useState(me?.profile?.phone || '');
@@ -31,7 +33,7 @@ export default function Settings() {
   return (
     <div>
       <PageHeader title={L('Settings', 'الإعدادات')} icon={Cog} tone="slate" />
-      <Tabs className="mb-3" value={tab} onChange={(t: string) => setSp({ tab: t })} tabs={[{ value: 'profile', label: L('Profile', 'الملف') }, { value: 'appearance', label: L('Appearance', 'المظهر') }, { value: 'accessibility', label: L('Accessibility', 'إمكانية الوصول') }, { value: 'security', label: L('Security', 'الأمان') }, admin && { value: 'users', label: L('Users', 'المستخدمون') }, admin && { value: 'backup', label: L('Backup', 'النسخ الاحتياطي') }, admin && { value: 'audit', label: L('Audit log', 'سجل التدقيق') }]} />
+      <Tabs className="mb-3" value={tab} onChange={(t: string) => setSp({ tab: t })} tabs={[{ value: 'profile', label: L('Profile', 'الملف') }, { value: 'appearance', label: L('Appearance', 'المظهر') }, { value: 'accessibility', label: L('Accessibility', 'إمكانية الوصول') }, { value: 'security', label: L('Security', 'الأمان') }, admin && { value: 'users', label: L('Users', 'المستخدمون') }, admin && { value: 'backup', label: L('Backup', 'النسخ الاحتياطي') }, admin && { value: 'audit', label: L('Audit log', 'سجل التدقيق') }, admin && { value: 'demo', label: L('Demo access', 'الوصول التجريبي') }]} />
       {tab === 'profile' && <Card title={L('Profile', 'الملف')}><div className="grid gap-3 max-w-md"><Field label={L('Display name', 'الاسم')}><Input value={name} onChange={(e: any) => setName(e.target.value)} /></Field><Field label={L('Phone', 'الجوال')}><Input dir="ltr" value={phone} onChange={(e: any) => setPhone(e.target.value)} /></Field><Btn icon={Save} onClick={async () => { try { await act('profile.update', { display_name: name, phone }); await reloadMe(); toast(L('Saved', 'تم الحفظ')); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Save', 'حفظ')}</Btn></div></Card>}
       {tab === 'appearance' && <Card title={L('Appearance', 'المظهر')}><div className="grid gap-3 max-w-md"><Field label={L('Theme', 'السمة')}><Select value={prefs.theme} onChange={(e: any) => p({ theme: e.target.value })}><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option></Select></Field><Field label={L('Language', 'اللغة')}><Select value={prefs.lang} onChange={(e: any) => p({ lang: e.target.value })}><option value="en">English</option><option value="ar">العربية</option></Select></Field><Field label={L('Density', 'الكثافة')}><Select value={prefs.density} onChange={(e: any) => p({ density: e.target.value })}><option value="compact">Compact</option><option value="comfortable">Comfortable</option></Select></Field></div></Card>}
       {tab === 'accessibility' && <Card title={L('Accessibility', 'إمكانية الوصول')}><div className="grid gap-2 max-w-md"><Field label={`${L('Font size', 'حجم الخط')} ${Math.round(prefs.fontScale * 100)}%`}><input type="range" min="0.85" max="1.4" step="0.05" value={prefs.fontScale} onChange={(e) => p({ fontScale: Number(e.target.value) })} aria-label="Font size" /></Field><Toggle label={L('High contrast', 'تباين عالٍ')} checked={prefs.highContrast} onChange={(v: boolean) => p({ highContrast: v })} /><Toggle label={L('Reduce motion', 'تقليل الحركة')} checked={prefs.reduceMotion} onChange={(v: boolean) => p({ reduceMotion: v })} /><Toggle label={L('Large touch targets (44px)', 'أهداف لمس كبيرة')} checked={prefs.largeTargets} onChange={(v: boolean) => p({ largeTargets: v })} /><Toggle label={L('Keyboard shortcuts (Alt+1–9, Alt+L, Alt+T, ?)', 'اختصارات لوحة المفاتيح')} checked={prefs.shortcuts} onChange={(v: boolean) => p({ shortcuts: v })} /><Toggle label={L('Screen reader announcements', 'إعلانات قارئ الشاشة')} checked={prefs.announce} onChange={(v: boolean) => p({ announce: v })} /></div></Card>}
@@ -59,6 +61,25 @@ export default function Settings() {
         </div>}
       </Card>}
       {tab === 'audit' && admin && <Card pad={false} title={L('Audit log', 'سجل التدقيق')}><Table dense rows={logs.data} columns={[{ key: 'at', label: 'When', render: (l: any) => <span className="text-xs">{fmtDateTime(l.created_at, lang)}</span> }, { key: 'actor_email', label: 'Actor' }, { key: 'action', label: 'Action' }, { key: 'resource', label: 'Resource' }, { key: 'record_id', label: 'Record' }, { key: 'ip', label: 'IP' }]} /></Card>}
+      {tab === 'demo' && admin && <Card title={L('Demo access links', 'روابط الوصول التجريبي')} icon={Link}>
+        <p className="text-sm text-muted mb-4">{L('Create a one-time demo link that an administrator can use to enter demo mode. The link expires after 24 hours or after first use.', 'أنشئ رابطًا تجريبيًا لاستخدام واحد يمكن لمشرف استخدامه للدخول إلى الوضع التجريبي. تنتهي صلاحية الرابط بعد 24 ساعة أو بعد الاستخدام الأول.')}</p>
+        <div className="flex gap-2 mb-4">
+          <Btn icon={Timer} onClick={async () => { try { const r = await act('demo.generate'); setDemoLink(r.token); setDemoUrl(r.url); toast(L('Demo link created', 'تم إنشاء الرابط التجريبي')); } catch (e: any) { toast(e.message, 'error'); } }}>{L('Generate demo link', 'إنشاء رابط تجريبي')}</Btn>
+        </div>
+        {demoLink && <div className="bg-surface2 rounded p-3 mb-4">
+          <div className="flex items-start gap-3">
+            <span className="text-brand">{L('Token:', 'الرمز:')}</span>
+            <div className="flex-1"><code className="text-xs text-muted block truncate">{demoLink}</code></div>
+            <Btn size="xs" variant="ghost" onClick={() => { navigator.clipboard.writeText(demoLink); toast(L('Copied', 'تم النسخ')); }}>{L('Copy', 'نسخ')}</Btn>
+          </div>
+          <div className="flex items-start gap-3 mt-2">
+            <span className="text-brand">{L('Share URL:', 'الرابط:')}</span>
+            <div className="flex-1"><code className="text-xs text-muted block truncate">{demoUrl}</code></div>
+            <Btn size="xs" variant="ghost" onClick={() => { navigator.clipboard.writeText(demoUrl); toast(L('Copied', 'تم النسخ')); }}>{L('Copy', 'نسخ')}</Btn>
+          </div>
+          <p className="text-xs text-muted mt-2">{L('Send this URL to the person who needs demo access. They open it, paste the token on the login screen, and get temporary admin demo access.', 'أرسل هذا الرابط إلى الشخص الذي يحتاج إلى وصول تجريبي. يفتحه، يلصق الرمز في شاشة تسجيل الدخول، وي obtient وصولاً تجريبيًا مؤقتًا للمشرف.')}</p>
+        </div>}
+      </Card>}
     </div>
   );
 }

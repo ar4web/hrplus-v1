@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, Phone, ShieldCheck, UserRound, Handshake, Lock, Eye, EyeOff, Languages, Sun, Moon, KeyRound, ArrowRight, Loader2, Check } from 'lucide-react';
+import { Mail, Phone, ShieldCheck, Eye, EyeOff, Languages, Sun, Moon, KeyRound, Loader2, Check } from 'lucide-react';
 import supabase from '../lib/supabase';
 import { signInWithGoogle } from '../lib/googleAuth';
 import { useAuth } from '../lib/auth';
 import { usePrefs } from '../lib/prefs';
 import { Btn, Field, Input, Segmented, ErrorBox } from '../components/ui';
-
-const DEMO: any = { admin: { email: 'admin@hrplus.sa', phone: '+966500000001' }, employee: { email: 'employee@hrplus.sa', phone: '+966500000003' }, vendor: { email: 'vendor@hrplus.sa', phone: '+966500000005' } };
-const DEMO_PW = 'HRplus@2026';
 
 export function passwordIssues(pw: string, L: any) {
   const out: string[] = [];
@@ -53,7 +50,6 @@ function MfaStep() {
 export default function Login() {
   const { L, setPrefs, isDark, lang } = usePrefs();
   const { mfaNeeded, session, notice, setNotice, error: authError } = useAuth();
-  const [role, setRole] = useState<'employee' | 'vendor' | 'admin'>('employee');
   const [method, setMethod] = useState<'email' | 'phone'>('email');
   const [mode, setMode] = useState<'signin' | 'signup' | 'reset'>('signin');
   const [email, setEmail] = useState('');
@@ -65,10 +61,17 @@ export default function Login() {
   const [err, setErr] = useState('');
   const [info, setInfo] = useState('');
   const [brand, setBrand] = useState<any>(null);
+  const [demoToken, setDemoToken] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('demo');
+    if (token) { setDemoToken(token); window.history.replaceState({}, '', window.location.pathname); }
+  }, []);
+
   useEffect(() => { fetch('/api/me?public=1').then((r) => r.json()).then((d) => setBrand(d.company)).catch(() => {}); }, []);
   useEffect(() => { if (notice === 'expired') setInfo(L('Your session expired due to inactivity. Please sign in again.', 'انتهت جلستك بسبب عدم النشاط. يرجى تسجيل الدخول مجدداً.')); }, [notice, L]);
 
-  const fillDemo = () => { setEmail(DEMO[role].email); setPhone(DEMO[role].phone); setPassword(DEMO_PW); setMode('signin'); setErr(''); };
   const submit = async (e: any) => {
     e.preventDefault(); setErr(''); setInfo(''); setNotice('');
     try {
@@ -105,12 +108,21 @@ export default function Login() {
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 
-  const roles = [
-    { value: 'employee', label: L('Employee', 'موظف'), icon: UserRound, tone: 'sky', hint: L('Attendance, leave, payslips, expenses & documents — only your own records.', 'الحضور والإجازات والرواتب والمصروفات — سجلاتك فقط.') },
-    { value: 'vendor', label: L('Vendor', 'مورد'), icon: Handshake, tone: 'violet', hint: L('Your invoices with ZATCA QR, consultant timesheets & messages — only your account.', 'فواتيرك وسجلات الساعات والرسائل — حسابك فقط.') },
-    { value: 'admin', label: L('Admin', 'مسؤول'), icon: ShieldCheck, tone: 'coral', hint: L('Full control: workforce, payroll, compliance, invoicing and settings.', 'تحكم كامل: القوى العاملة والرواتب والامتثال والإعدادات.') },
-  ];
-  const cur = roles.find((r) => r.value === role)!;
+  const requestDemoAccess = async () => {
+    if (!demoToken.trim()) { setErr(L('Enter the demo access token', 'أدخل رمز الوصول التجريبي')); return; }
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/actions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'demo.access', token: demoToken.trim() })
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Demo access denied');
+      window.location.href = '/';
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
   const features = [['GOSI', 'التأمينات', 'mint'], ['WPS / Mudad', 'حماية الأجور', 'sky'], ['ZATCA e-invoice', 'فاتورة', 'coral'], ['Iqama tracking', 'متابعة الإقامات', 'amber'], ['EOSB', 'مكافأة نهاية الخدمة', 'violet'], ['VAT 15%', 'ضريبة 15%', 'rose']];
 
   return (
@@ -143,24 +155,24 @@ export default function Login() {
             {session && mfaNeeded ? <MfaStep /> : (
               <>
                 <h2 className="font-display text-2xl font-semibold">{mode === 'signup' ? L('Create your account', 'إنشاء حساب') : mode === 'reset' ? L('Reset password', 'إعادة تعيين كلمة المرور') : L('Sign in to HRplus', 'تسجيل الدخول إلى HRplus')}</h2>
-                <p className="text-sm text-muted mt-1">{L('Choose your portal', 'اختر بوابتك')}</p>
-                <div className="grid grid-cols-3 gap-1.5 mt-4" role="radiogroup" aria-label="Portal">
-                  {roles.map((r) => (
-                    <button key={r.value} role="radio" aria-checked={role === r.value} onClick={() => setRole(r.value as any)} className={`flex flex-col items-center gap-1 py-3 text-sm font-medium transition ${role === r.value ? 'bg-brand/15 text-brand ring-2 ring-inset ring-current' : 'bg-surface2 text-muted hover:text-ink'}`}>
-                      <r.icon size={20} aria-hidden />{r.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted mt-2 min-h-[2.5em]">{cur.hint}</p>
 
-                {mode === 'signin' && <div className="mt-3"><Segmented value={method} onChange={setMethod} label="Sign-in method" size="md" options={[{ value: 'email', label: L('Email', 'البريد'), icon: Mail }, { value: 'phone', label: L('Phone', 'الجوال'), icon: Phone }]} /></div>}
+                {mode === 'signin' && (
+                  <div className="mb-6">
+                    <Btn variant="subtle" size="lg" className="w-full" onClick={() => signInWithGoogle('HRplus')}>
+                      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" /><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" /><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" /><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" /></svg>
+                      {L('Continue with Google', 'المتابعة باستخدام Google')}
+                    </Btn>
+                    <div className="flex items-center gap-3 my-3 text-xs text-muted"><span className="flex-1 h-px bg-line" />{L('or', 'أو')}<span className="flex-1 h-px bg-line" /></div>
+                  </div>
+                )}
 
                 <form onSubmit={submit} className="flex flex-col gap-3 mt-4" noValidate>
                   {mode === 'signup' && <Field label={L('Full name', 'الاسم الكامل')} htmlFor="nm"><Input id="nm" value={name} onChange={(e: any) => setName(e.target.value)} autoComplete="name" /></Field>}
                   {(method === 'email' || mode !== 'signin') ? (
                     <Field label={L('Work email', 'البريد الإلكتروني')} htmlFor="em"><Input id="em" type="email" dir="ltr" value={email} onChange={(e: any) => setEmail(e.target.value)} autoComplete="email" placeholder="name@company.sa" /></Field>
                   ) : (
-                    <Field label={L('Mobile number', 'رقم الجوال')} htmlFor="ph" hint={L('Saudi format, e.g. +9665XXXXXXXX or 05XXXXXXXX', 'مثال: 05XXXXXXXX')}><Input id="ph" type="tel" dir="ltr" value={phone} onChange={(e: any) => setPhone(e.target.value)} autoComplete="tel" placeholder="+966 5X XXX XXXX" /></Field>
+                    <Field label={L('Mobile number', 'رقم الجوال')} htmlFor="ph" hint={L('Saudi format, e.g. +9665XXXXXXXX or 05XXXXXXXX', 'مثال: 05XXXXXXXX')}>
+                      <Input id="ph" type="tel" dir="ltr" value={phone} onChange={(e: any) => setPhone(e.target.value)} autoComplete="tel" placeholder="+966 5X XXX XXXX" /></Field>
                   )}
                   {mode !== 'reset' && (
                     <Field label={L('Password', 'كلمة المرور')} htmlFor="pw">
@@ -173,27 +185,29 @@ export default function Login() {
                   )}
                   {(err || authError) && <ErrorBox error={err || authError} />}
                   {info && <div className="p-3 text-sm bg-sky/12 text-sky" role="status">{info}</div>}
-                  <Btn type="submit" size="lg" loading={busy} icon={mode === 'reset' ? Mail : Lock}>{mode === 'signup' ? L('Create account', 'إنشاء حساب') : mode === 'reset' ? L('Send reset link', 'إرسال الرابط') : L(`Sign in as ${cur.label}`, `دخول كـ${cur.label}`)}</Btn>
+                  <Btn type="submit" size="lg" loading={busy} icon={mode === 'reset' ? Mail : Lock}>{mode === 'signup' ? L('Create account', 'إنشاء حساب') : mode === 'reset' ? L('Send reset link', 'إرسال الرابط') : L('Sign in', 'تسجيل الدخول')}</Btn>
                 </form>
 
                 {mode === 'signin' && (
                   <>
-                    <div className="flex items-center gap-3 my-4 text-xs text-muted"><span className="flex-1 h-px bg-line" />{L('or', 'أو')}<span className="flex-1 h-px bg-line" /></div>
-                    <Btn variant="subtle" size="lg" className="w-full" onClick={() => signInWithGoogle('HRplus')}>
-                      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" /><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" /><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" /><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" /></svg>
-                      {L('Continue with Google', 'المتابعة باستخدام Google')}
-                    </Btn>
-                    <button onClick={fillDemo} className="w-full mt-3 p-3 bg-brand2/15 text-start text-xs flex items-center gap-2 hover:bg-brand2/25">
-                      <span className="w-7 h-7 grid place-items-center bg-brand2 text-[#2a1d00] shrink-0"><ArrowRight size={14} className="rtl:rotate-180" /></span>
-                      <span><b>{L(`Use demo ${cur.label} account`, `استخدم حساب ${cur.label} التجريبي`)}</b><br /><span className="text-muted" dir="ltr">{method === 'phone' ? DEMO[role].phone : DEMO[role].email} · {DEMO_PW}</span></span>
-                    </button>
+                    <div className="mt-5 p-4 bg-amber/10 border border-amber/20 rounded-lg">
+                      <h3 className="text-sm font-semibold text-amber mb-2">{L('Admin demo access', 'الوصول التجريبي للمشرف')}</h3>
+                      <p className="text-xs text-amber mb-3">{L('Generate a one-time demo link from Admin Settings > Demo Access, then paste the token here.', 'أنشئ رابطًا تجريبيًا من الإعدادات > الوصول التجريبي، ثم الصق الرمز هنا.')}</p>
+                      <Input placeholder={L('Demo access token', 'رمز الوصول التجريبي')} value={demoToken} onChange={(e: any) => setDemoToken(e.target.value)} className="!h-10 text-sm mb-2" />
+                      <Btn size="sm" onClick={requestDemoAccess} loading={busy}>{L('Enter demo', 'الدخول التجريبي')}</Btn>
+                    </div>
+                    <div className="flex justify-between mt-5 text-sm">
+                      <button className="text-brand hover:underline" onClick={() => setMode('signup')}>{L('Create account', 'إنشاء حساب')}</button>
+                      <button className="text-muted hover:underline" onClick={() => setMode('reset')}>{L('Forgot password?', 'نسيت كلمة المرور؟')}</button>
+                    </div>
                   </>
                 )}
-                <div className="flex justify-between mt-5 text-sm">
-                  {mode === 'signin' ? <button className="text-brand hover:underline" onClick={() => setMode('signup')}>{L('Create account', 'إنشاء حساب')}</button> : <button className="text-brand hover:underline" onClick={() => setMode('signin')}>{L('Back to sign in', 'العودة لتسجيل الدخول')}</button>}
-                  {mode === 'signin' && <button className="text-muted hover:underline" onClick={() => setMode('reset')}>{L('Forgot password?', 'نسيت كلمة المرور؟')}</button>}
-                </div>
-                <p className="text-[0.7rem] text-muted mt-6 flex items-start gap-1.5"><ShieldCheck size={13} className="shrink-0 mt-0.5 text-mint" />{L('Your portal is determined by your account role on the server — selecting a tab never grants extra access.', 'يُحدد الوصول حسب دور حسابك في الخادم — اختيار البوابة لا يمنح صلاحيات إضافية.')}</p>
+                {mode !== 'signin' && (
+                  <div className="flex justify-between mt-5 text-sm">
+                    {mode === 'signup' ? <button className="text-brand hover:underline" onClick={() => setMode('signin')}>{L('Back to sign in', 'العودة لتسجيل الدخول')}</button> : null}
+                    {mode === 'reset' && <button className="text-brand hover:underline" onClick={() => setMode('signin')}>{L('Back to sign in', 'العودة لتسجيل الدخول')}</button>}
+                  </div>
+                )}
               </>
             )}
           </div>

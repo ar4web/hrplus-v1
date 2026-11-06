@@ -5,7 +5,12 @@ import { r2, r1, riyadhDate, riyadhTime, riyadhMinutes, addDays, workingDays, ca
 import { signInvoice, computeLines, INITIAL_PIH } from './_zatca.js';
 
 const H = {};
-const PENDING_OK = ['prefs.save', 'profile.update', 'mfa.sync', 'notifications.list', 'notifications.read', 'ticket.create', 'ticket.reply', 'audit.event'];
+const PENDING_OK = ['prefs.save', 'profile.update', 'mfa.sync', 'notifications.list', 'notifications.read', 'ticket.create', 'ticket.reply', 'audit.event', 'demo.access'];
+
+// Demo access tokens (admin-only, time-limited). In production these should be
+// persisted in a DB table; for the local emulator they live in memory.
+const demoTokens = new Map(); // token -> { expiresAt, createdBy, maxUses, uses }
+const DEMO_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export default async function handler(req, res) {
   if (cors(req, res)) return;
@@ -976,4 +981,37 @@ async function vendorDash(ctx, b, P, cmp) {
     { key: 'activity', type: 'feed', title: ['Account activity', 'نشاط الحساب'], items: [...notes.map((n) => ({ at: n.created_at, title: [n.title, n.title_ar || n.title], body: [n.body, n.body_ar || n.body], level: n.level, link: n.link })), ...invs.slice(-8).map((i) => ({ at: `${i.issue_date}T09:00:00Z`, title: [`Invoice ${i.number}`, `فاتورة ${i.number}`], body: [`SAR ${Number(i.total).toLocaleString()} · ${i.status}`, `${Number(i.total).toLocaleString()} ر.س · ${i.status}`], level: i.status === 'paid' ? 'success' : 'info', link: '/invoices' }))].sort((a, c) => (a.at < c.at ? 1 : -1)).slice(0, 20) },
   ];
   return { role: 'vendor', period: P, kpis, charts, scopes: null };
+}
+
+/* ---------------- demo access (admin only) ---------------- */
+H['demo.generate'] = async (ctx) => {
+  if (!isAdmin(ctx)) throw new HttpError(403, 'Demo access links can only be created by an administrator');
+  const token = crypto.randomBytes(16).toString('hex');
+  demoTokens.set(token, {
+    expiresAt: Date.now() + DEMO_TTL_MS,
+    createdBy: ctx.profile.id,
+    maxUses: 1,
+    uses: 0,
+  });
+  await audit(ctx, 'demo.link.create', 'demo_tokens', token, { expiresAt: new Date(Date.now() + DEMO_TTL_MS).toISOString() });
+  return { token, url: `${windowOrigin(ctx)}/login?demo=${token}`, expiresAt: new Date(Date.now() + DEMO_TTL_MS).toISOString() };
+};
+
+H['demo.access'] = async (ctx, b) => {
+  const token = String(b.token || '');
+  if (!token) throw new HttpError(400, 'Demo token is required');
+  const rec = demoTokens.get(token);
+  if (!rec) throw new HttpError(404, 'Invalid or expired demo token');
+  if (Date.now() > rec.expiresAt) { demoTokens.delete(token); throw new HttpError(403, 'Demo token has expired'); }
+  if (rec.uses >= (rec.maxUses || 1)) { demoTokens.delete(token); throw new HttpError(403, 'Demo token has already been used'); }
+  if (!ctx.profile || ctx.profile.role !== 'admin') throw new HttpError(403, 'Demo access requires an administrator account');
+  rec.uses += 1;
+  if (rec.uses >= (rec.maxUses || 1)) demoTokens.delete(token);
+  await audit(ctx, 'demo.access.use', 'demo_tokens', token, { usedBy: ctx.profile.id });
+  return { ok: true, demo: true, role: ctx.profile.role };
+};
+
+function windowOrigin(ctx: any) {
+  const origin = ctx?.req?.headers?.origin || ctx?.headers?.origin;
+  return origin || 'https://hrplus-v1.vercel.app';
 }
